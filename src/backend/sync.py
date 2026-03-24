@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -13,9 +14,10 @@ from typing import Callable
 import psutil
 
 from .google_drive import GoogleDriveClient
-from .models import GameProfile
+from .models import GameProfile, is_steam_game_id
 
 StatusCallback = Callable[[str], None]
+GAME_LAUNCH_TIMEOUT_SECONDS = 30
 
 
 class SyncError(RuntimeError):
@@ -64,11 +66,12 @@ class SaveSyncService:
     def run_profile(self, profile: GameProfile, status: StatusCallback | None = None) -> None:
         report = status or (lambda _: None)
         save_folder = Path(profile.save_folder_path)
-        game_exe = Path(profile.game_exe_path)
         meta_path = self._meta_path(save_folder)
 
-        if not game_exe.exists():
-            raise SyncError(f"Spiel-Executable nicht gefunden: {game_exe}")
+        if not self._is_steam_target(profile.game_exe_path):
+            game_exe = Path(profile.game_exe_path)
+            if not game_exe.exists():
+                raise SyncError(f"Spiel-Executable nicht gefunden: {game_exe}")
         if save_folder.exists() and not save_folder.is_dir():
             raise SyncError(f"Save-Ordner ist ungültig: {save_folder}")
 
@@ -79,7 +82,7 @@ class SaveSyncService:
         initial_hash, cloud_hash, remote_file = self._download_if_needed(drive, profile, save_folder)
 
         report("Spielstart")
-        process = subprocess.Popen([str(game_exe)], shell=False)
+        process = self._launch_game(profile)
         self._wait_for_game(profile, process, report)
 
         report("Upload läuft")
@@ -136,7 +139,7 @@ class SaveSyncService:
     ) -> None:
         if final_hash is None:
             raise SyncError(f"Save-Ordner nicht gefunden: {save_folder}")
-        if final_hash == initial_hash:
+        if remote_file is not None and final_hash == initial_hash:
             return
         if cloud_hash and final_hash == cloud_hash:
             return
@@ -148,6 +151,9 @@ class SaveSyncService:
 
         if drive_file is None:
             drive_file = drive.CreateFile(metadata)
+        else:
+            for key, value in metadata.items():
+                drive_file[key] = value
 
         self._upload_directory(drive_file, save_folder)
         save_meta({"hash": final_hash, "kind": "directory"}, meta_path)
@@ -155,20 +161,58 @@ class SaveSyncService:
     def _wait_for_game(
         self,
         profile: GameProfile,
-        process: subprocess.Popen,
+        process: subprocess.Popen | None,
         report: StatusCallback,
     ) -> None:
+        launched = self._wait_for_game_launch(profile, process)
+        if not launched:
+            raise SyncError("Spielprozess wurde nach dem Start nicht erkannt.")
+
         report("Spiel läuft")
-        time.sleep(3)
         while True:
-            if process.poll() is not None and not self._any_game_process_running(profile):
+            process_running = process is not None and process.poll() is None
+            game_running = self._any_game_process_running(profile)
+            if not process_running and not game_running:
                 break
-            if self._any_game_process_running(profile):
+            if game_running:
                 time.sleep(2)
                 continue
-            if process.poll() is not None:
+            if not process_running:
                 break
             time.sleep(2)
+
+    def _wait_for_game_launch(
+        self,
+        profile: GameProfile,
+        process: subprocess.Popen | None,
+    ) -> bool:
+        deadline = time.monotonic() + GAME_LAUNCH_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            if self._any_game_process_running(profile):
+                return True
+            if process is not None and process.poll() is None:
+                return True
+            time.sleep(1)
+        return False
+
+    def _launch_game(self, profile: GameProfile) -> subprocess.Popen | None:
+        target = profile.game_exe_path
+        if self._is_steam_target(target):
+            self._open_steam_uri(self._steam_uri(target))
+            return None
+        return subprocess.Popen([target], shell=False)
+
+    def _open_steam_uri(self, uri: str) -> None:
+        if hasattr(os, "startfile"):
+            os.startfile(uri)
+            return
+        raise SyncError("Steam-Starts werden auf dieser Plattform nicht unterstützt.")
+
+    def _steam_uri(self, game_id: str) -> str:
+        return f"steam://rungameid/{game_id}"
+
+    def _is_steam_target(self, target: str) -> bool:
+        return is_steam_game_id(target)
 
     def _any_game_process_running(self, profile: GameProfile) -> bool:
         names = {name.lower() for name in profile.game_process_names}

@@ -3,9 +3,9 @@
 
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['src'],
     binaries=[],
-    datas=[('src/qml', 'src/qml')],
+    datas=[('src/qml', 'src/qml'), ('src/icon', 'src/icon')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -31,6 +31,7 @@ exe = EXE(
     runtime_tmpdir=None,
     console=True,
     disable_windowed_traceback=False,
+    icon='src/icon/icon.ico',
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,

@@ -96,7 +96,7 @@ ApplicationWindow {
 
     FileDialog {
         id: exeDialog
-        title: "Spiel-Executable auswählen"
+        title: "Spiel-EXE auswählen"
         onAccepted: exeField.text = controller.fileUrlToPath(selectedFile.toString())
     }
 
@@ -293,6 +293,7 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         radius: 18
                         color: sidebarPanelBg
+                        clip: true
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -305,11 +306,23 @@ ApplicationWindow {
                                 font.bold: true
                             }
 
-                            Label {
+                            Flickable {
                                 Layout.fillWidth: true
-                                text: controller.statusMessage
-                                color: mutedText
-                                wrapMode: Text.WordWrap
+                                Layout.fillHeight: true
+                                clip: true
+                                contentWidth: width
+                                contentHeight: statusText.implicitHeight
+                                boundsBehavior: Flickable.StopAtBounds
+                                interactive: contentHeight > height
+
+                                Text {
+                                    id: statusText
+                                    x: 2
+                                    width: parent.width - 4
+                                    text: controller.statusMessage
+                                    color: mutedText
+                                    wrapMode: Text.WordWrap
+                                }
                             }
                         }
                     }
@@ -381,12 +394,12 @@ ApplicationWindow {
                             ToolTip.text: "Name des Spiels, wie es in der Auswahlliste und im Profil angezeigt wird."
                         }
 
-                        Label { text: "Spiel-Executable"; color: bodyText }
+                        Label { text: "Spielstart"; color: bodyText }
                         TextField {
                             id: exeField
                             Layout.fillWidth: true
                             hoverEnabled: true
-                            placeholderText: "Pfad zur EXE"
+                            placeholderText: "EXE-Pfad oder Steam-ID"
                             color: controlText
                             placeholderTextColor: "#586270"
                             background: Rectangle {
@@ -397,11 +410,11 @@ ApplicationWindow {
                             }
 
                             ToolTip.visible: hovered
-                            ToolTip.text: "Vollständiger Pfad zur ausführbaren Datei des Spiels."
+                            ToolTip.text: "Lokalen EXE-Pfad eintragen oder bei Steam-Spielen nur die numerische Spiel-ID eingeben."
                         }
                         Button {
                             id: exePickButton
-                            text: "Datei wählen"
+                            text: "EXE wählen"
                             onClicked: exeDialog.open()
                             background: Rectangle {
                                 radius: 10

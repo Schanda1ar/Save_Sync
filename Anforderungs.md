@@ -27,7 +27,7 @@ Die Anwendung muss mehrere Spieleprofile verwalten können. Jedes Profil beschre
 
 Ein Profil muss mindestens folgende Felder enthalten:
 - Anzeigename des Spiels
-- Pfad zur Spiel-Executable
+- Startziel des Spiels, entweder als Pfad zur lokalen Spiel-Executable oder als Steam-Spiel-ID
 - Pfad zum Save-Ordner
 - Prozessname oder Liste von Prozessnamen zur Erkennung, ob das Spiel läuft
 - Name des Cloud-Archivs auf Google Drive
@@ -116,6 +116,7 @@ Für jeden Save-Ordner gilt:
 - der Vergleich darf nicht nur auf eine einzelne Datei reduziert werden
 - neue, fehlende oder gelöschte Dateien im Save-Ordner müssen als Änderung erkannt werden
 - in Google Drive wird der Save-Ordner als ZIP-Archiv gespeichert und zum Vergleich wieder entpackt
+- wenn für ein Profil noch kein passendes ZIP in Google Drive vorhanden ist, muss beim ersten erfolgreichen Lauf ein Initial-Upload erfolgen
 
 Zusätzlich soll die UI den Status sichtbar machen, zum Beispiel:
 - bereit
@@ -132,7 +133,7 @@ Zusätzlich soll die UI den Status sichtbar machen, zum Beispiel:
 - ein klar sichtbarer Start-Button, der das im Dropdown gewählte Spiel startet
 - Formularansicht zum Erstellen und Bearbeiten eines Profils
 - sichtbare Felder für alle relevanten Pfade und Google-Drive-Einstellungen
-- Möglichkeit zur Ordnerauswahl für den Save-Ordner und Dateiauswahl für die Spiel-Executable
+- Möglichkeit zur Ordnerauswahl für den Save-Ordner und Dateiauswahl für lokale Spiel-Executables
 - Profil-ID wird automatisch erstellt und ist im UI nicht editierbar
 - Hover-Hinweise für die wichtigsten Eingabefelder und Auswahl-Elemente
 - Statusanzeige für Sync und Authentifizierung
@@ -160,6 +161,7 @@ Ein Spieleprofil soll mindestens folgende Daten enthalten:
 Vorgabe:
 - `cloud_provider` ist in Version 1 fest auf `google_drive`
 - `save_folder_path` verweist immer auf einen kompletten Save-Ordner
+- `game_exe_path` speichert entweder einen lokalen EXE-Pfad oder eine numerische Steam-Spiel-ID
 - `drive_filename` wird intern als ZIP-Dateiname gespeichert; die UI darf den Basisnamen ohne `.zip` anzeigen
 
 ## Beispiel für ein austauschbares JSON-Profil
@@ -199,10 +201,12 @@ Hinweis:
 - Intern wird der Archivname immer als `.zip` in Google Drive verwendet.
 - Ein abgelaufenes Token führt nicht sofort zum Fehler, sondern zuerst zu einem Refresh-Versuch.
 - Wenn der Refresh nicht funktioniert, wird eine neue Anmeldung angefordert.
+- Ein Profil kann alternativ zu einem lokalen EXE-Pfad auch über eine Steam-Spiel-ID gestartet werden.
 - Nach Spielende wird nur dann hochgeladen, wenn sich der lokale Spielstand geändert hat.
 - Save-Ordner mit mehreren Dateien werden vollständig geprüft und nicht nur über eine Einzeldatei behandelt.
 - Sobald sich mindestens eine Datei in einem Save-Ordner unterscheidet, wird eine Synchronisierung ausgelöst.
 - Neue, fehlende oder gelöschte Dateien in einem Save-Ordner werden als Änderung erkannt.
+- Wenn noch kein passendes Cloud-Archiv vorhanden ist, wird beim ersten erfolgreichen Lauf ein Initial-Upload erstellt.
 
 ## Offene Architekturidee für die spätere Umsetzung
 - QML für Oberfläche
@@ -238,4 +242,5 @@ Hinweis:
 - [x] Dateiänderungen, fehlende Dateien und neue Dateien im Save-Ordner als Sync-Trigger behandeln
 - [x] Cloud-Abgleich für ordnerbasierte Saves über ZIP-Archive implementieren
 - [x] Tests für Mehrdatei-Saves, Normalisierung des Archivnamens und ordnerbasierte Synchronisation ergänzen
-- [ ] Zusätzliche Abnahmetests für UI-Workflows, reale OAuth-Fehlerfälle und Google-Drive-Smoke-Tests durchführen
+- [x] Zusätzliche Abnahmetests für UI-Workflows und reale OAuth-Fehlerfälle automatisiert ergänzen
+- [ ] Manuellen Google-Drive-Smoke-Test mit echtem OAuth-Login und Testordner einmal vollständig durchführen

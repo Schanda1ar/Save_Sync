@@ -92,3 +92,30 @@ def test_import_normalizes_drive_filename_without_zip(tmp_path: Path) -> None:
     imported = import_profiles(target)
 
     assert imported[0].drive_filename == "manual_backup.zip"
+
+
+def test_import_accepts_numeric_steam_id_as_launch_target(tmp_path: Path) -> None:
+    target = tmp_path / "profiles.json"
+    target.write_text(
+        json.dumps(
+            {
+                "profiles": [
+                    {
+                        "id": "steam-game",
+                        "display_name": "Steam Game",
+                        "game_exe_path": "2646460",
+                        "save_folder_path": "C:/Saves/Game",
+                        "game_process_names": ["Game.exe"],
+                        "drive_filename": "steam_backup",
+                        "drive_folder_id": "",
+                        "cloud_provider": "google_drive",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    imported = import_profiles(target)
+
+    assert imported[0].game_exe_path == "2646460"

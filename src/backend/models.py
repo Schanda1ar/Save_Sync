@@ -58,6 +58,17 @@ def normalize_drive_filename(value: Any) -> str:
     return f"{stem}.zip"
 
 
+def is_steam_game_id(value: str) -> bool:
+    return value.isdigit()
+
+
+def normalize_launch_target(value: Any) -> str:
+    text = _clean_string(value, "game_exe_path")
+    if is_steam_game_id(text):
+        return text
+    return text
+
+
 @dataclass(slots=True)
 class GameProfile:
     id: str
@@ -99,7 +110,7 @@ class GameProfile:
         profile = cls(
             id=_clean_string(payload.get("id"), "id"),
             display_name=_clean_string(payload.get("display_name"), "display_name"),
-            game_exe_path=_clean_string(payload.get("game_exe_path"), "game_exe_path"),
+            game_exe_path=normalize_launch_target(payload.get("game_exe_path")),
             save_folder_path=normalize_save_folder_path(
                 payload.get("save_folder_path", payload.get("save_file_path"))
             ),
@@ -121,8 +132,12 @@ class GameProfile:
     def validate(self) -> None:
         if self.cloud_provider != "google_drive":
             raise ValidationError("Aktuell wird nur 'google_drive' unterstützt.")
+        if is_steam_game_id(self.game_exe_path):
+            return
         if not Path(self.game_exe_path).suffix:
-            raise ValidationError("'game_exe_path' muss auf eine ausführbare Datei zeigen.")
+            raise ValidationError(
+                "'game_exe_path' muss auf eine ausführbare Datei oder eine Steam-Spiel-ID zeigen."
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
