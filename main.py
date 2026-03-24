@@ -9,11 +9,13 @@ if str(SRC_DIR) not in sys.path:
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuickControls2 import QQuickStyle
 
 from backend.ui import AppController
 
 
 def main() -> int:
+    QQuickStyle.setStyle("Basic")
     app = QGuiApplication(sys.argv)
     app.setApplicationName("Save Sync")
     app.setOrganizationName("Save Sync")

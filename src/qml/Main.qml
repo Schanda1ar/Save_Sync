@@ -158,19 +158,26 @@ ApplicationWindow {
                     }
 
                     Button {
-                        id: startButton
+                        id: saveProfileButton
                         Layout.fillWidth: true
-                        text: controller.busy ? "Läuft..." : "Spiel starten"
-                        enabled: !controller.busy
-                        onClicked: controller.startSelectedGame()
+                        text: "Profil speichern"
+                        onClicked: controller.saveProfile(
+                            idField.text,
+                            nameField.text,
+                            exeField.text,
+                            saveField.text,
+                            processField.text,
+                            driveFileField.text,
+                            driveFolderField.text
+                        )
                         background: Rectangle {
                             radius: 12
-                            color: startButton.hovered ? buttonHoverBg : buttonBg
+                            color: saveProfileButton.hovered ? buttonHoverBg : buttonBg
                             border.color: controlBorder
                             border.width: 1
                         }
                         contentItem: Text {
-                            text: startButton.text
+                            text: saveProfileButton.text
                             color: buttonText
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -464,7 +471,6 @@ ApplicationWindow {
 
                             ToolTip.visible: hovered
                             ToolTip.text: "Name des Archivs in Google Drive."
-                            ToolTip.font.pixelSize: 11
                         }
 
                         Label { text: "Drive-Ordner-ID"; color: bodyText }
@@ -491,30 +497,26 @@ ApplicationWindow {
                     Item { Layout.fillHeight: true }
 
                     Button {
-                        id: saveProfileButton
+                        id: startButton
                         Layout.alignment: Qt.AlignRight
-                        text: "Profil speichern"
-                        onClicked: controller.saveProfile(
-                            idField.text,
-                            nameField.text,
-                            exeField.text,
-                            saveField.text,
-                            processField.text,
-                            driveFileField.text,
-                            driveFolderField.text
-                        )
+                        Layout.minimumWidth: 260
+                        text: controller.busy ? "Läuft..." : "Spiel starten"
+                        enabled: !controller.busy
+                        implicitHeight: 68
+                        onClicked: controller.startSelectedGame()
                         background: Rectangle {
                             radius: 12
-                            color: saveProfileButton.hovered ? buttonHoverBg : buttonBg
+                            color: startButton.hovered ? buttonHoverBg : buttonBg
                             border.color: controlBorder
                             border.width: 1
                         }
                         contentItem: Text {
-                            text: saveProfileButton.text
+                            text: startButton.text
                             color: buttonText
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                             font.bold: true
+                            font.pixelSize: 18
                         }
                     }
                 }
@@ -522,4 +524,3 @@ ApplicationWindow {
         }
     }
 }
-
