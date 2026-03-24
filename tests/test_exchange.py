@@ -14,7 +14,7 @@ def build_profile() -> GameProfile:
         game_exe_path="C:/Games/Game.exe",
         save_folder_path="C:/Saves/Game",
         game_process_names=["Game.exe"],
-        drive_filename="game.zip",
+        drive_filename="game",
         drive_folder_id="folder-1",
     )
 
@@ -28,6 +28,7 @@ def test_export_and_import_profiles_roundtrip(tmp_path: Path) -> None:
     assert len(imported) == 1
     assert imported[0].display_name == "Example Game"
     assert imported[0].save_folder_path == str(Path("C:/Saves/Game"))
+    assert imported[0].drive_filename == "game.zip"
 
 
 def test_import_rejects_duplicate_ids(tmp_path: Path) -> None:
@@ -64,3 +65,30 @@ def test_import_supports_legacy_save_file_path_field(tmp_path: Path) -> None:
     imported = import_profiles(target)
 
     assert imported[0].save_folder_path == str(Path("C:/Saves/Game"))
+
+
+def test_import_normalizes_drive_filename_without_zip(tmp_path: Path) -> None:
+    target = tmp_path / "profiles.json"
+    target.write_text(
+        json.dumps(
+            {
+                "profiles": [
+                    {
+                        "id": "plain-name",
+                        "display_name": "Example Game",
+                        "game_exe_path": "C:/Games/Game.exe",
+                        "save_folder_path": "C:/Saves/Game",
+                        "game_process_names": ["Game.exe"],
+                        "drive_filename": "manual_backup",
+                        "drive_folder_id": "",
+                        "cloud_provider": "google_drive",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    imported = import_profiles(target)
+
+    assert imported[0].drive_filename == "manual_backup.zip"

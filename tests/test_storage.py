@@ -39,7 +39,7 @@ def test_save_writes_json_config(tmp_path: Path) -> None:
         game_exe_path="C:/Games/Game.exe",
         save_folder_path="C:/Saves/save_dir",
         game_process_names=["Game.exe"],
-        drive_filename="save.zip",
+        drive_filename="save",
         drive_folder_id="folder123",
     )
     config = AppConfig(profiles=[profile], selected_profile_id=profile.id)
@@ -49,3 +49,4 @@ def test_save_writes_json_config(tmp_path: Path) -> None:
     assert payload["selected_profile_id"] == "profile-1"
     assert payload["profiles"][0]["id"] == "profile-1"
     assert payload["profiles"][0]["save_folder_path"] == str(Path("C:/Saves/save_dir"))
+    assert payload["profiles"][0]["drive_filename"] == "save.zip"

@@ -163,7 +163,7 @@ Vorgabe:
       "game_exe_path": "C:/Games/MyGame/Game.exe",
       "save_folder_path": "C:/Users/User/Documents/MyGame/SaveGames",
       "game_process_names": ["Game.exe"],
-      "drive_filename": "mygame_save.zip",
+      "drive_filename": "mygame_save",
       "drive_folder_id": "1AbCdEfGhIjKlMnOp",
       "cloud_provider": "google_drive"
     }

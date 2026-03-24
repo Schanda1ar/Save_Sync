@@ -64,6 +64,7 @@ class AppController(QObject):
             }
         data = profile.to_dict()
         data["game_process_names"] = ", ".join(profile.game_process_names)
+        data["drive_filename"] = self._display_drive_filename(profile.drive_filename)
         return data
 
     @Property(str, notify=selectedProfileIdChanged)
@@ -235,3 +236,8 @@ class AppController(QObject):
             return source_url
         parsed = urlparse(source_url)
         return unquote(parsed.path.lstrip("/"))
+
+    def _display_drive_filename(self, filename: str) -> str:
+        if filename.lower().endswith(".zip"):
+            return filename[:-4]
+        return filename

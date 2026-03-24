@@ -28,7 +28,6 @@ ApplicationWindow {
     property color dangerHoverBg: "#c99595"
     property color buttonText: "#111827"
     property color controlText: "#111827"
-
     property var selectedData: controller.selectedProfileData
 
     function syncComboSelection() {
@@ -71,6 +70,12 @@ ApplicationWindow {
         function onSelectedProfileDataChanged() { window.reloadForm() }
         function onProfilesChanged() { window.syncComboSelection() }
         function onSelectedProfileIdChanged() { window.syncComboSelection() }
+    }
+
+    ToolTip {
+        id: hoverTip
+        delay: 300
+        timeout: 5000
     }
 
     FileDialog {
@@ -141,11 +146,15 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         model: controller.profileOptions
                         textRole: "display_name"
+                        hoverEnabled: true
                         onActivated: controller.selectProfileIndex(currentIndex)
                         palette.button: controlBg
                         palette.base: controlBg
                         palette.text: controlText
                         palette.buttonText: controlText
+
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Wählt das aktive Spielprofil aus, das gestartet und synchronisiert wird."
                     }
 
                     Button {
@@ -309,6 +318,8 @@ ApplicationWindow {
                             id: idField
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
+                            readOnly: true
+                            hoverEnabled: true
                             placeholderText: "Wird automatisch erzeugt"
                             color: controlText
                             placeholderTextColor: "#586270"
@@ -318,6 +329,9 @@ ApplicationWindow {
                                 border.color: controlBorder
                                 border.width: 1
                             }
+
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Die Profil-ID wird automatisch erstellt und dient als interne eindeutige Kennung."
                         }
 
                         Label { text: "Anzeigename"; color: bodyText }
@@ -325,6 +339,7 @@ ApplicationWindow {
                             id: nameField
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
+                            hoverEnabled: true
                             placeholderText: "z. B. Elden Ring"
                             color: controlText
                             placeholderTextColor: "#586270"
@@ -334,12 +349,16 @@ ApplicationWindow {
                                 border.color: controlBorder
                                 border.width: 1
                             }
+
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Name des Spiels, wie es in der Auswahlliste und im Profil angezeigt wird."
                         }
 
                         Label { text: "Spiel-Executable"; color: bodyText }
                         TextField {
                             id: exeField
                             Layout.fillWidth: true
+                            hoverEnabled: true
                             placeholderText: "Pfad zur EXE"
                             color: controlText
                             placeholderTextColor: "#586270"
@@ -349,6 +368,9 @@ ApplicationWindow {
                                 border.color: controlBorder
                                 border.width: 1
                             }
+
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Vollständiger Pfad zur ausführbaren Datei des Spiels."
                         }
                         Button {
                             id: exePickButton
@@ -372,6 +394,7 @@ ApplicationWindow {
                         TextField {
                             id: saveField
                             Layout.fillWidth: true
+                            hoverEnabled: true
                             placeholderText: "Pfad zum Save-Ordner"
                             color: controlText
                             placeholderTextColor: "#586270"
@@ -381,6 +404,9 @@ ApplicationWindow {
                                 border.color: controlBorder
                                 border.width: 1
                             }
+
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Ordner mit allen Save-Dateien des Spiels."
                         }
                         Button {
                             id: saveFolderButton
@@ -405,6 +431,7 @@ ApplicationWindow {
                             id: processField
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
+                            hoverEnabled: true
                             placeholderText: "Game.exe, Launcher.exe"
                             color: controlText
                             placeholderTextColor: "#586270"
@@ -414,14 +441,18 @@ ApplicationWindow {
                                 border.color: controlBorder
                                 border.width: 1
                             }
+
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Kommagetrennte Prozessnamen, über die erkannt wird, ob das Spiel noch läuft."
                         }
 
-                        Label { text: "Drive-Dateiname"; color: bodyText }
+                        Label { text: "Drive-Archivname"; color: bodyText }
                         TextField {
                             id: driveFileField
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
-                            placeholderText: "savegame.zip"
+                            hoverEnabled: true
+                            placeholderText: "savegame"
                             color: controlText
                             placeholderTextColor: "#586270"
                             background: Rectangle {
@@ -430,15 +461,10 @@ ApplicationWindow {
                                 border.color: controlBorder
                                 border.width: 1
                             }
-                        }
 
-                        Label { text: "Drive-Archivname"; color: bodyText }
-                        Label {
-                            Layout.columnSpan: 2
-                            Layout.fillWidth: true
-                            text: "Der Drive-Dateiname ist immer der Name des ZIP-Archivs in Google Drive."
-                            color: mutedText
-                            wrapMode: Text.WordWrap
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Name des Archivs in Google Drive."
+                            ToolTip.font.pixelSize: 11
                         }
 
                         Label { text: "Drive-Ordner-ID"; color: bodyText }
@@ -446,6 +472,7 @@ ApplicationWindow {
                             id: driveFolderField
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
+                            hoverEnabled: true
                             placeholderText: "Optional"
                             color: controlText
                             placeholderTextColor: "#586270"
@@ -455,6 +482,9 @@ ApplicationWindow {
                                 border.color: controlBorder
                                 border.width: 1
                             }
+
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Optionaler Zielordner in Google Drive. Leer bedeutet, dass der Standardort verwendet wird."
                         }
                     }
 
@@ -492,3 +522,4 @@ ApplicationWindow {
         }
     }
 }
+

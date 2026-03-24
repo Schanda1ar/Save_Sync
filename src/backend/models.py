@@ -49,6 +49,15 @@ def normalize_save_folder_path(value: Any) -> str:
     return str(path)
 
 
+def normalize_drive_filename(value: Any) -> str:
+    text = _clean_string(value, "drive_filename")
+    stem = Path(text).stem if text.lower().endswith(".zip") else text
+    stem = stem.strip().strip(".")
+    if not stem:
+        raise ValidationError("'drive_filename' darf nicht leer sein.")
+    return f"{stem}.zip"
+
+
 @dataclass(slots=True)
 class GameProfile:
     id: str
@@ -95,7 +104,7 @@ class GameProfile:
                 payload.get("save_folder_path", payload.get("save_file_path"))
             ),
             game_process_names=normalize_process_names(payload.get("game_process_names")),
-            drive_filename=_clean_string(payload.get("drive_filename"), "drive_filename"),
+            drive_filename=normalize_drive_filename(payload.get("drive_filename")),
             drive_folder_id=_clean_string(
                 payload.get("drive_folder_id", ""),
                 "drive_folder_id",
@@ -114,8 +123,6 @@ class GameProfile:
             raise ValidationError("Aktuell wird nur 'google_drive' unterstützt.")
         if not Path(self.game_exe_path).suffix:
             raise ValidationError("'game_exe_path' muss auf eine ausführbare Datei zeigen.")
-        if not self.drive_filename.lower().endswith(".zip"):
-            raise ValidationError("'drive_filename' muss auf '.zip' enden.")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
