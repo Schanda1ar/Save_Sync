@@ -182,6 +182,28 @@ class AppController(QObject):
         self._set_status(f"Profile exportiert nach {path}.")
 
     @Slot()
+    def duplicateSelectedProfile(self) -> None:
+        profile = self._config.get_profile(self._config.selected_profile_id)
+        if profile is None:
+            self._set_status("Kein Profil ausgewählt.")
+            return
+
+        copy_profile = GameProfile.create(
+            display_name=self._next_copy_name(profile.display_name),
+            game_exe_path=profile.game_exe_path,
+            save_folder_path=profile.save_folder_path,
+            game_process_names=profile.game_process_names,
+            drive_filename=profile.drive_filename,
+            drive_folder_id=profile.drive_folder_id,
+        )
+        self._config.profiles.append(copy_profile)
+        self._config.selected_profile_id = copy_profile.id
+        self._persist()
+        self._set_status(
+            f"Profil '{profile.display_name}' als '{copy_profile.display_name}' kopiert."
+        )
+
+    @Slot()
     def startSelectedGame(self) -> None:
         profile = self._config.get_profile(self._config.selected_profile_id)
         if profile is None:
@@ -241,3 +263,16 @@ class AppController(QObject):
         if filename.lower().endswith(".zip"):
             return filename[:-4]
         return filename
+
+    def _next_copy_name(self, base_name: str) -> str:
+        existing_names = {profile.display_name for profile in self._config.profiles}
+        copy_name = f"{base_name} (Kopie)"
+        if copy_name not in existing_names:
+            return copy_name
+
+        counter = 2
+        while True:
+            copy_name = f"{base_name} (Kopie {counter})"
+            if copy_name not in existing_names:
+                return copy_name
+            counter += 1

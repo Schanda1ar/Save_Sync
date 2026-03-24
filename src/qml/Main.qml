@@ -209,6 +209,26 @@ ApplicationWindow {
                     }
 
                     Button {
+                        id: duplicateProfileButton
+                        Layout.fillWidth: true
+                        text: "Profil kopieren"
+                        onClicked: controller.duplicateSelectedProfile()
+                        background: Rectangle {
+                            radius: 12
+                            color: duplicateProfileButton.hovered ? buttonHoverBg : buttonBg
+                            border.color: controlBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: duplicateProfileButton.text
+                            color: buttonText
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
+                    }
+
+                    Button {
                         id: importButton
                         Layout.fillWidth: true
                         text: "Import JSON"
