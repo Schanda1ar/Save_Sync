@@ -259,6 +259,96 @@ def test_controller_export_profiles_writes_json(monkeypatch, tmp_path: Path) -> 
     assert controller.statusMessage == f"Profile exportiert nach {export_file}."
 
 
+def test_controller_has_no_unsaved_changes_for_selected_profile(monkeypatch, tmp_path: Path) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": "C:/Saves/Game",
+                    "game_process_names": ["Game.exe", "Launcher.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "folder-123",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+
+    controller = AppController(tmp_path)
+
+    assert (
+        controller.hasUnsavedProfileChanges(
+            "Example Game",
+            "2646460",
+            "C:/Saves/Game",
+            "Game.exe, Launcher.exe",
+            "savegame",
+            "folder-123",
+        )
+        is False
+    )
+
+
+def test_controller_detects_unsaved_changes_for_selected_profile(monkeypatch, tmp_path: Path) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": "C:/Saves/Game",
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+
+    controller = AppController(tmp_path)
+
+    assert (
+        controller.hasUnsavedProfileChanges(
+            "Example Game geändert",
+            "2646460",
+            "C:/Saves/Game",
+            "Game.exe",
+            "savegame",
+            "",
+        )
+        is True
+    )
+
+
+def test_controller_detects_unsaved_changes_for_new_profile_draft(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(ui_module, "ConfigStore", DummyStore)
+
+    controller = AppController(tmp_path)
+
+    assert (
+        controller.hasUnsavedProfileChanges(
+            "New Game",
+            "",
+            "",
+            "",
+            "",
+            "",
+        )
+        is True
+    )
+
+
 def test_controller_start_selected_game_reports_sync_error(monkeypatch, tmp_path: Path) -> None:
     store = DummyStore()
     store.config = AppConfig.from_dict(

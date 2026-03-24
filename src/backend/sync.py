@@ -258,8 +258,25 @@ class SaveSyncService:
             drive_file.SetContentFile(str(archive_path))
             drive_file.Upload()
         finally:
+            self._release_drive_file_content(drive_file)
+            self._cleanup_temp_archive(archive_path)
+
+    def _release_drive_file_content(self, drive_file) -> None:
+        content = getattr(drive_file, "content", None)
+        if content is None:
+            return
+        try:
+            content.close()
+        except OSError:
+            pass
+        drive_file.content = None
+
+    def _cleanup_temp_archive(self, archive_path: Path) -> None:
+        try:
             if archive_path.exists():
                 archive_path.unlink()
+        except OSError:
+            pass
 
     def _backup_existing(self, save_folder: Path) -> None:
         if not save_folder.exists():

@@ -106,6 +106,14 @@ ApplicationWindow {
         onAccepted: saveField.text = controller.fileUrlToPath(selectedFolder.toString())
     }
 
+    MessageDialog {
+        id: unsavedChangesDialog
+        title: "Ungespeicherte Änderungen"
+        text: "Die Änderungen an diesem Profil wurden noch nicht gespeichert."
+        informativeText: "Speichere das Profil zuerst, bevor du das Spiel startest."
+        buttons: MessageDialog.Ok
+    }
+
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
@@ -536,7 +544,20 @@ ApplicationWindow {
                         text: controller.busy ? "Läuft..." : "Spiel starten"
                         enabled: !controller.busy
                         implicitHeight: 68
-                        onClicked: controller.startSelectedGame()
+                        onClicked: {
+                            if (controller.hasUnsavedProfileChanges(
+                                    nameField.text,
+                                    exeField.text,
+                                    saveField.text,
+                                    processField.text,
+                                    driveFileField.text,
+                                    driveFolderField.text
+                                )) {
+                                unsavedChangesDialog.open()
+                                return
+                            }
+                            controller.startSelectedGame()
+                        }
                         background: Rectangle {
                             radius: 12
                             color: startButton.hovered ? buttonHoverBg : buttonBg

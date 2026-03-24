@@ -125,6 +125,24 @@ class DummyDriveFile(dict):
     pass
 
 
+class UploadDriveFile(dict):
+    def __init__(self, *, fail_on_upload: bool = False) -> None:
+        super().__init__()
+        self.fail_on_upload = fail_on_upload
+        self.content = None
+        self.uploaded_path: Path | None = None
+
+    def SetContentFile(self, filename: str) -> None:
+        self.uploaded_path = Path(filename)
+        self.content = open(filename, "rb")
+
+    def Upload(self) -> None:
+        if self.fail_on_upload:
+            raise RuntimeError("upload failed")
+        if self.content is None:
+            raise AssertionError("Expected open upload content")
+
+
 def test_upload_if_needed_creates_initial_remote_archive_without_local_changes(tmp_path: Path) -> None:
     service = SaveSyncService(base_dir=tmp_path)
     profile = GameProfile.create(
@@ -197,3 +215,49 @@ def test_upload_if_needed_updates_existing_remote_file_metadata(tmp_path: Path) 
     assert existing_file["title"] == "fresh-name.zip"
     assert existing_file["parents"] == [{"id": "new-folder"}]
     assert uploaded == [existing_file]
+
+
+def test_upload_directory_closes_drive_content_and_removes_temp_archive(tmp_path: Path) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    save_folder = tmp_path / "save"
+    save_folder.mkdir()
+    (save_folder / "slot1.sav").write_text("data", encoding="utf-8")
+    drive_file = UploadDriveFile()
+
+    service._upload_directory(drive_file, save_folder)
+
+    assert drive_file.uploaded_path is not None
+    assert drive_file.content is None
+    assert not drive_file.uploaded_path.exists()
+
+
+def test_upload_directory_ignores_locked_temp_archive_cleanup(tmp_path: Path, monkeypatch) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    save_folder = tmp_path / "save"
+    save_folder.mkdir()
+    (save_folder / "slot1.sav").write_text("data", encoding="utf-8")
+    drive_file = UploadDriveFile()
+
+    def deny_unlink(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("file is locked")
+
+    monkeypatch.setattr(Path, "unlink", deny_unlink)
+
+    service._upload_directory(drive_file, save_folder)
+
+    assert drive_file.uploaded_path is not None
+    assert drive_file.content is None
+    assert drive_file.uploaded_path.exists()
+
+
+def test_upload_directory_propagates_upload_errors(tmp_path: Path) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    save_folder = tmp_path / "save"
+    save_folder.mkdir()
+    (save_folder / "slot1.sav").write_text("data", encoding="utf-8")
+    drive_file = UploadDriveFile(fail_on_upload=True)
+
+    with pytest.raises(RuntimeError, match="upload failed"):
+        service._upload_directory(drive_file, save_folder)
+
+    assert drive_file.content is None

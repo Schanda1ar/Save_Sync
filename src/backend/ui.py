@@ -7,7 +7,15 @@ from urllib.parse import unquote, urlparse
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from .exchange import export_profiles, import_profiles
-from .models import AppConfig, GameProfile, ValidationError
+from .models import (
+    AppConfig,
+    GameProfile,
+    ValidationError,
+    normalize_drive_filename,
+    normalize_launch_target,
+    normalize_process_names,
+    normalize_save_folder_path,
+)
 from .storage import ConfigStore
 from .sync import SaveSyncService, SyncError
 
@@ -225,6 +233,46 @@ class AppController(QObject):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    @Slot(str, str, str, str, str, str, result=bool)
+    def hasUnsavedProfileChanges(
+        self,
+        display_name: str,
+        game_exe_path: str,
+        save_folder_path: str,
+        process_names: str,
+        drive_filename: str,
+        drive_folder_id: str,
+    ) -> bool:
+        current_data = {
+            "display_name": self._normalized_or_stripped(display_name),
+            "game_exe_path": self._normalized_or_stripped(
+                game_exe_path, normalize_launch_target
+            ),
+            "save_folder_path": self._normalized_or_stripped(
+                save_folder_path, normalize_save_folder_path
+            ),
+            "game_process_names": self._normalized_process_names(process_names),
+            "drive_filename": self._normalized_display_drive_filename(drive_filename),
+            "drive_folder_id": self._normalized_or_stripped(drive_folder_id),
+        }
+
+        profile = self._config.get_profile(self._config.selected_profile_id)
+        if profile is None:
+            return any(
+                value if not isinstance(value, list) else len(value) > 0
+                for value in current_data.values()
+            )
+
+        stored_data = {
+            "display_name": profile.display_name,
+            "game_exe_path": profile.game_exe_path,
+            "save_folder_path": profile.save_folder_path,
+            "game_process_names": profile.game_process_names,
+            "drive_filename": self._display_drive_filename(profile.drive_filename),
+            "drive_folder_id": profile.drive_folder_id,
+        }
+        return current_data != stored_data
+
     @Slot(str, result=str)
     def fileUrlToPath(self, source_url: str) -> str:
         return self._file_url_to_path(source_url)
@@ -263,6 +311,26 @@ class AppController(QObject):
         if filename.lower().endswith(".zip"):
             return filename[:-4]
         return filename
+
+    def _normalized_or_stripped(self, value: str, normalizer=None) -> str:
+        if normalizer is None:
+            return value.strip()
+        try:
+            return normalizer(value)
+        except ValidationError:
+            return value.strip()
+
+    def _normalized_process_names(self, value: str) -> list[str]:
+        try:
+            return normalize_process_names(value)
+        except ValidationError:
+            return [item.strip() for item in value.split(",") if item.strip()]
+
+    def _normalized_display_drive_filename(self, value: str) -> str:
+        try:
+            return self._display_drive_filename(normalize_drive_filename(value))
+        except ValidationError:
+            return value.strip()
 
     def _next_copy_name(self, base_name: str) -> str:
         existing_names = {profile.display_name for profile in self._config.profiles}
