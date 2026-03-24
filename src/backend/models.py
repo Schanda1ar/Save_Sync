@@ -105,6 +105,7 @@ class GameProfile:
 class AppConfig:
     profiles: list[GameProfile] = field(default_factory=list)
     selected_profile_id: str = ""
+    theme_mode: str = "light"
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "AppConfig":
@@ -116,6 +117,7 @@ class AppConfig:
         config = cls(
             profiles=profiles,
             selected_profile_id=str(payload.get("selected_profile_id", "")).strip(),
+            theme_mode=str(payload.get("theme_mode", "light")).strip() or "light",
         )
         config.validate()
         return config

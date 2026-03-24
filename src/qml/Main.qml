@@ -9,7 +9,24 @@ ApplicationWindow {
     height: 760
     visible: true
     title: "Save Sync"
-    color: "#f4efe7"
+    color: darkMode ? "#0f1722" : "#f4efe7"
+
+    property bool darkMode: controller.darkMode
+    property color pageStart: darkMode ? "#0f1722" : "#f7f1e7"
+    property color pageEnd: darkMode ? "#1b2635" : "#dfebf4"
+    property color sidebarBg: darkMode ? "#121a24" : "#1f2f3d"
+    property color sidebarPanelBg: darkMode ? "#1a2432" : "#304657"
+    property color contentBg: darkMode ? "#1a2230" : "#fffaf2"
+    property color titleText: darkMode ? "#f3f6fa" : "#1c2730"
+    property color bodyText: darkMode ? "#eef3f8" : "#1c2730"
+    property color mutedText: darkMode ? "#c8d0da" : "#6a7685"
+    property color controlBg: darkMode ? "#18202d" : "#ffffff"
+    property color controlBorder: darkMode ? "#506279" : "#b9c5d0"
+    property color buttonBg: darkMode ? "#273547" : "#e9eff5"
+    property color buttonHoverBg: darkMode ? "#314357" : "#dce8f4"
+    property color dangerBg: darkMode ? "#5a3131" : "#f4dede"
+    property color dangerHoverBg: darkMode ? "#6f3b3b" : "#f0caca"
+    property color buttonText: darkMode ? "#f3f6fa" : "#1c2730"
 
     property var selectedData: controller.selectedProfileData
 
@@ -83,11 +100,17 @@ ApplicationWindow {
         onAccepted: saveField.text = controller.fileUrlToPath(selectedFile.toString())
     }
 
+    FolderDialog {
+        id: saveFolderDialog
+        title: "Save-Ordner ausw?hlen"
+        onAccepted: saveField.text = controller.fileUrlToPath(selectedFolder.toString())
+    }
+
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#f7f1e7" }
-            GradientStop { position: 1.0; color: "#dfebf4" }
+            GradientStop { position: 0.0; color: pageStart }
+            GradientStop { position: 1.0; color: pageEnd }
         }
 
         RowLayout {
@@ -99,7 +122,7 @@ ApplicationWindow {
                 Layout.preferredWidth: 320
                 Layout.fillHeight: true
                 radius: 24
-                color: "#1f2f3d"
+                color: sidebarBg
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -108,14 +131,36 @@ ApplicationWindow {
 
                     Label {
                         text: "Spielauswahl"
-                        color: "#f4efe7"
+                        color: titleText
                         font.pixelSize: 28
                         font.bold: true
                     }
 
                     Label {
                         text: "Profil wählen"
-                        color: "#c9d9e6"
+                        color: mutedText
+                    }
+
+                    Button {
+                        id: toggleThemeButton
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 36
+                        text: darkMode ? "Lightmode" : "Darkmode"
+                        onClicked: controller.toggleTheme()
+                        background: Rectangle {
+                            radius: 12
+                            color: toggleThemeButton.hovered ? buttonHoverBg : buttonBg
+                            border.color: controlBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: toggleThemeButton.text
+                            color: buttonText
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
                     }
 
                     ComboBox {
@@ -164,7 +209,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         radius: 18
-                        color: "#304657"
+                        color: sidebarPanelBg
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -173,14 +218,14 @@ ApplicationWindow {
 
                             Label {
                                 text: "Status"
-                                color: "#f4efe7"
+                                color: titleText
                                 font.bold: true
                             }
 
                             Label {
                                 Layout.fillWidth: true
                                 text: controller.statusMessage
-                                color: "#dce7f0"
+                                color: mutedText
                                 wrapMode: Text.WordWrap
                             }
                         }
@@ -192,7 +237,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: 24
-                color: "#fffaf2"
+                color: contentBg
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -201,7 +246,7 @@ ApplicationWindow {
 
                     Label {
                         text: "Profil bearbeiten"
-                        color: "#1c2730"
+                        color: titleText
                         font.pixelSize: 26
                         font.bold: true
                     }
@@ -212,7 +257,7 @@ ApplicationWindow {
                         columnSpacing: 12
                         rowSpacing: 10
 
-                        Label { text: "Profil-ID" }
+                        Label { text: "Profil-ID"; color: bodyText }
                         TextField {
                             id: idField
                             Layout.columnSpan: 2
@@ -220,7 +265,7 @@ ApplicationWindow {
                             placeholderText: "Wird automatisch erzeugt"
                         }
 
-                        Label { text: "Anzeigename" }
+                        Label { text: "Anzeigename"; color: bodyText }
                         TextField {
                             id: nameField
                             Layout.columnSpan: 2
@@ -228,7 +273,7 @@ ApplicationWindow {
                             placeholderText: "z. B. Elden Ring"
                         }
 
-                        Label { text: "Spiel-Executable" }
+                        Label { text: "Spiel-Executable"; color: bodyText }
                         TextField {
                             id: exeField
                             Layout.fillWidth: true
@@ -239,18 +284,27 @@ ApplicationWindow {
                             onClicked: exeDialog.open()
                         }
 
-                        Label { text: "Save-Datei" }
+                        Label { text: "Save-Datei oder Ordner"; color: bodyText }
                         TextField {
                             id: saveField
                             Layout.fillWidth: true
-                            placeholderText: "Pfad zur Save-Datei"
+                            placeholderText: "Pfad zur Save-Datei oder zum Save-Ordner"
                         }
-                        Button {
-                            text: "Datei wählen"
-                            onClicked: saveDialog.open()
+                        RowLayout {
+                            spacing: 8
+
+                            Button {
+                                text: "Datei"
+                                onClicked: saveDialog.open()
+                            }
+
+                            Button {
+                                text: "Ordner"
+                                onClicked: saveFolderDialog.open()
+                            }
                         }
 
-                        Label { text: "Prozessnamen" }
+                        Label { text: "Prozessnamen"; color: bodyText }
                         TextField {
                             id: processField
                             Layout.columnSpan: 2
@@ -258,7 +312,7 @@ ApplicationWindow {
                             placeholderText: "Game.exe, Launcher.exe"
                         }
 
-                        Label { text: "Drive-Dateiname" }
+                        Label { text: "Drive-Dateiname"; color: bodyText }
                         TextField {
                             id: driveFileField
                             Layout.columnSpan: 2
@@ -266,7 +320,7 @@ ApplicationWindow {
                             placeholderText: "save.sav"
                         }
 
-                        Label { text: "Drive-Ordner-ID" }
+                        Label { text: "Drive-Ordner-ID"; color: bodyText }
                         TextField {
                             id: driveFolderField
                             Layout.columnSpan: 2

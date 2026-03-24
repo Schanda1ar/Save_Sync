@@ -1,49 +1,53 @@
-# Anforderungsdokument Save Sync
+﻿# Anforderungsdokument Save Sync
 
 ## Ziel
-Das bestehende Projekt synchronisiert aktuell nur ein einzelnes Spiel über ein statisches `config.ini`-Setup. Es soll zu einer Desktop-Anwendung mit grafischer Oberfläche erweitert werden, sodass mehrere Spiele dynamisch verwaltet und synchronisiert werden können.
+Das bestehende Projekt synchronisiert aktuell nur ein einzelnes Spiel Ã¼ber ein statisches `config.ini`-Setup. Es soll zu einer Desktop-Anwendung mit grafischer OberflÃ¤che erweitert werden, sodass mehrere Spiele dynamisch verwaltet und synchronisiert werden kÃ¶nnen.
 
-Die Anwendung soll weiterhin lokale Spielstände mit Google Drive synchronisieren, aber die Verwaltung der Spiele, Pfade und Cloud-Ziele über eine UI ermöglichen. Außerdem soll die Konfiguration leicht mit anderen Personen austauschbar sein.
+Die Anwendung soll weiterhin lokale SpielstÃ¤nde mit Google Drive synchronisieren, aber die Verwaltung der Spiele, Pfade und Cloud-Ziele Ã¼ber eine UI ermÃ¶glichen. AuÃŸerdem soll die Konfiguration leicht mit anderen Personen austauschbar sein.
 
 ## Zielbild
 - Desktop-Anwendung statt reinem Startskript
 - UI mit Qt Quick / QML
 - Python-Backend mit klarer Trennung zwischen UI, Konfiguration und Sync-Logik
-- Unterstützung für mehrere Spieleprofile
+- UnterstÃ¼tzung fÃ¼r mehrere Spieleprofile
 - Import und Export von Spieleprofilen als JSON
-- Verbesserte OAuth-Behandlung für Google Drive
+- Verbesserte OAuth-Behandlung fÃ¼r Google Drive
 
 ## Technische Leitplanken
 - UI-Technologie: `Qt QML`
 - Python-Qt-Binding: `PySide6`
 - Cloud-Provider in der ersten Ausbaustufe: `Google Drive`
 - Zielplattform vorrangig: `Windows`
-- Bestehende Logik für Hash-Vergleich, Download vor Spielstart und Upload nach Spielende bleibt fachlich erhalten
+- Bestehende Logik fÃ¼r Hash-Vergleich, Download vor Spielstart und Upload nach Spielende bleibt fachlich erhalten
 
 ## Fachliche Anforderungen
 
-### 1. Spieleverwaltung über UI
-Die Anwendung muss mehrere Spieleprofile verwalten können. Jedes Profil beschreibt ein Spiel und alle Daten, die für die Synchronisation benötigt werden.
+### 1. Spieleverwaltung Ã¼ber UI
+Die Anwendung muss mehrere Spieleprofile verwalten kÃ¶nnen. Jedes Profil beschreibt ein Spiel und alle Daten, die fÃ¼r die Synchronisation benÃ¶tigt werden.
 
 Ein Profil muss mindestens folgende Felder enthalten:
 - Anzeigename des Spiels
 - Pfad zur Spiel-Executable
 - Pfad zur Save-Datei oder zum Save-Speicherort
-- Prozessname oder Liste von Prozessnamen zur Erkennung, ob das Spiel läuft
+- Prozessname oder Liste von Prozessnamen zur Erkennung, ob das Spiel lÃ¤uft
 - Dateiname auf Google Drive
 - Google-Drive-Ordner-ID als Zielordner
+
+Wichtig f?r Save-Daten:
+- ein Spielprofil muss sowohl einzelne Save-Dateien als auch komplette Save-Ordner unterst?tzen
+- wenn ein Save-Ordner verwendet wird, m?ssen alle relevanten Dateien im Ordner in die Synchronisationslogik einbezogen werden
 
 Die UI muss folgende Funktionen anbieten:
 - neues Spielprofil anlegen
 - bestehendes Spielprofil bearbeiten
-- Spielprofil löschen
-- Spielprofil auswählen
-- Spiel über ein Dropdown auswählen
-- ausgewähltes Spiel über einen Start-Button starten
-- Synchronisierung für das gewählte Spiel starten
+- Spielprofil lÃ¶schen
+- Spielprofil auswÃ¤hlen
+- Spiel Ã¼ber ein Dropdown auswÃ¤hlen
+- ausgewÃ¤hltes Spiel Ã¼ber einen Start-Button starten
+- Synchronisierung fÃ¼r das gewÃ¤hlte Spiel starten
 
 ### 2. Dynamische statt statischer Konfiguration
-Die bisherige starre `config.ini` soll nicht mehr das zentrale Modell sein. Stattdessen soll die Anwendung intern mit einer strukturierten Konfiguration für mehrere Spiele arbeiten.
+Die bisherige starre `config.ini` soll nicht mehr das zentrale Modell sein. Stattdessen soll die Anwendung intern mit einer strukturierten Konfiguration fÃ¼r mehrere Spiele arbeiten.
 
 Erwartetes Ziel:
 - zentrale App-Konfiguration in einem strukturierten Format
@@ -54,76 +58,85 @@ Erwartetes Ziel:
 Spieleprofile sollen leicht mit Freunden austauschbar sein.
 
 Daher muss die Anwendung:
-- Spieleprofile als JSON exportieren können
-- Spieleprofile aus JSON importieren können
-- beim Import prüfen, ob Pflichtfelder vorhanden sind
-- ungültige oder unvollständige JSON-Dateien mit verständlichen Fehlermeldungen ablehnen
+- Spieleprofile als JSON exportieren kÃ¶nnen
+- Spieleprofile aus JSON importieren kÃ¶nnen
+- beim Import prÃ¼fen, ob Pflichtfelder vorhanden sind
+- ungÃ¼ltige oder unvollstÃ¤ndige JSON-Dateien mit verstÃ¤ndlichen Fehlermeldungen ablehnen
 
 Wichtig:
-- OAuth-Credentials, Tokens oder sonstige geheime Daten dürfen nicht exportiert werden
-- Export und Import sollen sich auf Spieleprofile und deren Sync-Einstellungen beschränken
+- OAuth-Credentials, Tokens oder sonstige geheime Daten dÃ¼rfen nicht exportiert werden
+- Export und Import sollen sich auf Spieleprofile und deren Sync-Einstellungen beschrÃ¤nken
 
 ### 4. Google-Drive-Ziel frei definierbar
-Der Nutzer muss den Speicherort in Google Drive selbst festlegen können.
+Der Nutzer muss den Speicherort in Google Drive selbst festlegen kÃ¶nnen.
 
 Dazu muss pro Spielprofil konfigurierbar sein:
 - in welchen Google-Drive-Ordner synchronisiert wird
 - unter welchem Dateinamen die Save-Datei in der Cloud gespeichert wird
 
-Die bisher bereits bekannte Ordner-ID-Logik soll erhalten bleiben, aber nicht mehr hart oder indirekt fest im Code hängen.
+Die bisher bereits bekannte Ordner-ID-Logik soll erhalten bleiben, aber nicht mehr hart oder indirekt fest im Code hÃ¤ngen.
 
 ### 5. Verbesserte OAuth-Behandlung
 Die Google-Authentifizierung muss robuster werden.
 
-Gewünschtes Verhalten:
+GewÃ¼nschtes Verhalten:
 - vorhandene Credentials werden geladen, wenn sie existieren
 - wenn das Access-Token abgelaufen ist, soll zuerst versucht werden, es sauber zu erneuern
-- falls ein Refresh nicht möglich ist oder fehlschlägt, soll eine neue Anmeldung angefordert werden
+- falls ein Refresh nicht mÃ¶glich ist oder fehlschlÃ¤gt, soll eine neue Anmeldung angefordert werden
 - neue oder erneuerte Credentials sollen wieder lokal gespeichert werden
 
-Die Anwendung muss Fehlerfälle sauber behandeln:
-- keine gültigen Credentials vorhanden
+Die Anwendung muss FehlerfÃ¤lle sauber behandeln:
+- keine gÃ¼ltigen Credentials vorhanden
 - Token abgelaufen
 - Refresh fehlgeschlagen
 - Zugriff entzogen
 - `client_secrets.json` fehlt
 
 ### 6. Synchronisationsablauf
-Der bestehende Grundablauf bleibt erhalten und soll in die neue Architektur übernommen werden:
+Der bestehende Grundablauf bleibt erhalten und soll in die neue Architektur Ã¼bernommen werden:
 
-1. Vor Spielstart Cloud-Datei prüfen
+1. Vor Spielstart Cloud-Datei prÃ¼fen
 2. Falls Cloud-Stand neuer ist, lokal sichern und herunterladen
 3. Spiel starten
 4. Warten bis das Spiel beendet wurde
-5. Nach Spielende lokalen Save erneut prüfen
-6. Nur bei Änderung hochladen
+5. Nach Spielende lokalen Save erneut prÃ¼fen
+6. Nur bei Ã„nderung hochladen
 
-Zusätzlich soll die UI den Status sichtbar machen, zum Beispiel:
+F?r Spiele mit mehreren Save-Dateien gilt zus?tzlich:
+- wenn der konfigurierte Save-Pfad ein Ordner ist, muss ?ber alle Dateien im Ordner iteriert werden
+- f?r jede Datei muss ein Hash berechnet und mit dem Cloud-Stand verglichen werden
+- sobald mindestens eine Datei unterschiedlich ist, muss die normale Sync-Logik f?r das betroffene Spiel greifen
+- der Vergleich darf nicht nur auf eine einzelne Datei reduziert werden
+- neue, fehlende oder gel?schte Dateien im Save-Ordner m?ssen als ?nderung erkannt werden
+
+ZusÃ¤tzlich soll die UI den Status sichtbar machen, zum Beispiel:
 - bereit
 - Anmeldung erforderlich
-- Download läuft
-- Spiel läuft
-- Upload läuft
+- Download lÃ¤uft
+- Spiel lÃ¤uft
+- Upload lÃ¤uft
 - abgeschlossen
 - Fehler
 
 ## UI-Anforderungen
 - Startansicht mit Liste der vorhandenen Spieleprofile
-- zusätzlich eine zentrale Auswahl des aktiven Spiels über ein Dropdown
-- ein klar sichtbarer Start-Button, der das im Dropdown gewählte Spiel startet
+- zusÃ¤tzlich eine zentrale Auswahl des aktiven Spiels Ã¼ber ein Dropdown
+- ein klar sichtbarer Start-Button, der das im Dropdown gewÃ¤hlte Spiel startet
 - Formularansicht zum Erstellen und Bearbeiten eines Profils
-- sichtbare Felder für alle relevanten Pfade und Google-Drive-Einstellungen
-- Möglichkeit zur Dateiauswahl für lokale Pfade
-- Statusanzeige für Sync und Authentifizierung
-- klare Fehlermeldungen bei ungültigen Eingaben oder fehlenden Dateien
+- sichtbare Felder fÃ¼r alle relevanten Pfade und Google-Drive-Einstellungen
+- MÃ¶glichkeit zur Dateiauswahl fÃ¼r lokale Pfade
+- Statusanzeige fÃ¼r Sync und Authentifizierung
+- ein Darkmode muss verf?gbar sein
+- ein gut sichtbarer Button zum Umschalten zwischen Lightmode und Darkmode muss vorhanden sein
+- klare Fehlermeldungen bei ungÃ¼ltigen Eingaben oder fehlenden Dateien
 
-## Nicht-Ziele für die erste Ausbaustufe
-- Unterstützung mehrerer Cloud-Anbieter
+## Nicht-Ziele fÃ¼r die erste Ausbaustufe
+- UnterstÃ¼tzung mehrerer Cloud-Anbieter
 - Benutzerkonten innerhalb der App
-- automatischer Abgleich mehrerer Geräte ohne manuelles Profil-Setup
+- automatischer Abgleich mehrerer GerÃ¤te ohne manuelles Profil-Setup
 - Mitexport von Tokens oder geheimen Auth-Daten
 
-## Datenmodell für Spielprofile
+## Datenmodell fÃ¼r Spielprofile
 Ein Spieleprofil soll mindestens folgende Daten enthalten:
 
 - `id`
@@ -137,8 +150,9 @@ Ein Spieleprofil soll mindestens folgende Daten enthalten:
 
 Vorgabe:
 - `cloud_provider` ist in Version 1 fest auf `google_drive`
+- `save_file_path` darf entweder auf eine einzelne Datei oder auf einen kompletten Save-Ordner zeigen
 
-## Beispiel für ein austauschbares JSON-Profil
+## Beispiel fÃ¼r ein austauschbares JSON-Profil
 ```json
 {
   "profiles": [
@@ -157,41 +171,56 @@ Vorgabe:
 ```
 
 ## Abnahmekriterien
-- Es können mehrere Spieleprofile über die UI angelegt und gespeichert werden.
-- Spiele können über ein Dropdown ausgewählt werden.
-- Das im Dropdown gewählte Spiel kann über einen Start-Button gestartet werden.
-- Ein Nutzer kann ein Profil auswählen und eine Synchronisierung auslösen.
+- Es kÃ¶nnen mehrere Spieleprofile Ã¼ber die UI angelegt und gespeichert werden.
+- Spiele kÃ¶nnen Ã¼ber ein Dropdown ausgewÃ¤hlt werden.
+- Das im Dropdown gewÃ¤hlte Spiel kann Ã¼ber einen Start-Button gestartet werden.
+- Die Anwendung bietet einen Darkmode.
+- Der Nutzer kann den Darkmode ?ber einen sichtbaren Button im UI ein- und ausschalten.
+- Ein Nutzer kann ein Profil auswÃ¤hlen und eine Synchronisierung auslÃ¶sen.
 - Die Anwendung kann ein Profil als JSON exportieren.
-- Die Anwendung kann ein gültiges JSON-Profil importieren.
-- Ungültige JSON-Dateien werden mit verständlicher Meldung abgelehnt.
+- Die Anwendung kann ein gÃ¼ltiges JSON-Profil importieren.
+- UngÃ¼ltige JSON-Dateien werden mit verstÃ¤ndlicher Meldung abgelehnt.
 - Die Google-Drive-Ordner-ID kann pro Spiel individuell gesetzt werden.
-- Ein abgelaufenes Token führt nicht sofort zum Fehler, sondern zuerst zu einem Refresh-Versuch.
+- Ein abgelaufenes Token fÃ¼hrt nicht sofort zum Fehler, sondern zuerst zu einem Refresh-Versuch.
 - Wenn der Refresh nicht funktioniert, wird eine neue Anmeldung angefordert.
-- Nach Spielende wird nur dann hochgeladen, wenn sich der lokale Spielstand geändert hat.
+- Nach Spielende wird nur dann hochgeladen, wenn sich der lokale Spielstand geÃ¤ndert hat.
+- Save-Ordner mit mehreren Dateien werden vollst?ndig gepr?ft und nicht nur ?ber eine Einzeldatei behandelt.
+- Sobald sich mindestens eine Datei in einem Save-Ordner unterscheidet, wird eine Synchronisierung ausgel?st.
+- Neue, fehlende oder gel?schte Dateien in einem Save-Ordner werden als ?nderung erkannt.
 
-## Offene Architekturidee für die spätere Umsetzung
-- QML für Oberfläche
-- Python-Backend für Geschäftslogik
-- getrennte Module für:
+## Offene Architekturidee fÃ¼r die spÃ¤tere Umsetzung
+- QML fÃ¼r OberflÃ¤che
+- Python-Backend fÃ¼r GeschÃ¤ftslogik
+- getrennte Module fÃ¼r:
   - Profile und Konfiguration
   - JSON-Import/Export
   - OAuth und Google Drive
   - Synchronisationslogik
 
+
 ## Aufgabenliste
-- [ ] Bestehende Einzelspiel-Logik analysieren und in wiederverwendbare Services zerlegen
-- [ ] QML-basierte Desktop-Oberfläche aufsetzen
-- [ ] Datenmodell für mehrere Spieleprofile definieren
-- [ ] Lokale Konfigurationsspeicherung für mehrere Profile implementieren
-- [ ] UI zum Anlegen, Bearbeiten, Löschen und Auswählen von Profilen erstellen
-- [ ] Dropdown zur Auswahl des aktiven Spiels in der Hauptansicht umsetzen
-- [ ] Start-Button für das ausgewählte Spiel in der Hauptansicht umsetzen
-- [ ] Datei- und Pfadauswahl in der UI integrieren
-- [ ] JSON-Export für Spieleprofile implementieren
-- [ ] JSON-Import mit Validierung implementieren
-- [ ] Google-Drive-Ordner-ID pro Profil konfigurierbar machen
-- [ ] OAuth-Handling für Token-Refresh und Re-Login robuster machen
-- [ ] Statusanzeige für Auth, Download, Spielstatus und Upload in der UI darstellen
-- [ ] Fehlerbehandlung für fehlende Dateien, ungültige Konfiguration und Drive-Probleme ergänzen
-- [ ] Synchronisationsablauf aus dem bestehenden Skript in die neue Architektur überführen
-- [ ] Abnahmetests für Multi-Profil-Verwaltung, JSON-Austausch und OAuth-Fehlerfälle durchführen
+- [x] Bestehende Einzelspiel-Logik analysieren und in wiederverwendbare Services zerlegen
+- [x] QML-basierte Desktop-Oberfläche aufsetzen
+- [x] Datenmodell für mehrere Spieleprofile definieren
+- [x] Lokale Konfigurationsspeicherung für mehrere Profile implementieren
+- [x] UI zum Anlegen, Bearbeiten, Löschen und Auswählen von Profilen erstellen
+- [x] Dropdown zur Auswahl des aktiven Spiels in der Hauptansicht umsetzen
+- [x] Start-Button für das ausgewählte Spiel in der Hauptansicht umsetzen
+- [x] Datei- und Pfadauswahl in der UI integrieren
+- [ ] Darkmode für die QML-Oberfläche entwerfen und implementieren
+- [x] Button zum Umschalten zwischen Lightmode und Darkmode in der Hauptansicht umsetzen
+- [ ] Speicherung oder Wiederherstellung des gewählten Themes definieren und implementieren
+- [ ] UI-Tests bzw. manuelle Abnahme für Lightmode/Darkmode ergänzen
+- [x] JSON-Export für Spieleprofile implementieren
+- [x] JSON-Import mit Validierung implementieren
+- [x] Google-Drive-Ordner-ID pro Profil konfigurierbar machen
+- [x] OAuth-Handling für Token-Refresh und Re-Login robuster machen
+- [x] Statusanzeige für Auth, Download, Spielstatus und Upload in der UI darstellen
+- [x] Fehlerbehandlung für fehlende Dateien, ungültige Konfiguration und Drive-Probleme ergänzen
+- [x] Synchronisationsablauf aus dem bestehenden Skript in die neue Architektur überführen
+- [ ] Save-Ordner mit mehreren Dateien in der Backend-Logik unterstützen
+- [ ] Über alle Dateien im konfigurierten Save-Ordner iterieren und pro Datei Hashes berechnen
+- [ ] Dateiänderungen, fehlende Dateien und neue Dateien im Save-Ordner als Sync-Trigger behandeln
+- [ ] Cloud-Abgleich für Mehrdatei-Saves sauber definieren und implementieren
+- [ ] Tests für Mehrdatei-Saves und ordnerbasierte Synchronisation ergänzen
+- [ ] Zusätzliche Abnahmetests für UI-Workflows, reale OAuth-Fehlerfälle und Google-Drive-Smoke-Tests durchführen
