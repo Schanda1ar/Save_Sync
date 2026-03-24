@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from configparser import ConfigParser
@@ -44,9 +44,18 @@ class ConfigStore:
             profile_id="legacy-import",
             display_name="Legacy Game",
             game_exe_path=section.get("game_exe", ""),
-            save_file_path=section.get("save_file", ""),
+            save_folder_path=section.get("save_file", ""),
             game_process_names=section.get("game_process_names", ""),
-            drive_filename=section.get("drive_filename", ""),
+            drive_filename=self._legacy_drive_filename(section.get("drive_filename", "")),
             drive_folder_id=section.get("drive_folder_id", "").strip(),
         )
         return AppConfig(profiles=[profile], selected_profile_id=profile.id)
+
+    def _legacy_drive_filename(self, value: str) -> str:
+        filename = value.strip()
+        if not filename:
+            return "savegame.zip"
+        if filename.lower().endswith(".zip"):
+            return filename
+        stem = Path(filename).stem or filename
+        return f"{stem}.zip"

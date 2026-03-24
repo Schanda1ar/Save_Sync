@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -33,12 +33,28 @@ def normalize_process_names(value: Any) -> list[str]:
     return cleaned
 
 
+def normalize_save_folder_path(value: Any) -> str:
+    path_text = _clean_string(value, "save_folder_path")
+    path = Path(path_text)
+
+    if path.exists():
+        if path.is_dir():
+            return str(path)
+        if path.is_file():
+            return str(path.parent)
+        raise ValidationError("'save_folder_path' muss auf einen Ordner zeigen.")
+
+    if path.suffix:
+        return str(path.parent)
+    return str(path)
+
+
 @dataclass(slots=True)
 class GameProfile:
     id: str
     display_name: str
     game_exe_path: str
-    save_file_path: str
+    save_folder_path: str
     game_process_names: list[str]
     drive_filename: str
     drive_folder_id: str = ""
@@ -50,7 +66,7 @@ class GameProfile:
         *,
         display_name: str,
         game_exe_path: str,
-        save_file_path: str,
+        save_folder_path: str,
         game_process_names: list[str] | str,
         drive_filename: str,
         drive_folder_id: str = "",
@@ -61,7 +77,7 @@ class GameProfile:
                 "id": profile_id or uuid4().hex,
                 "display_name": display_name,
                 "game_exe_path": game_exe_path,
-                "save_file_path": save_file_path,
+                "save_folder_path": save_folder_path,
                 "game_process_names": game_process_names,
                 "drive_filename": drive_filename,
                 "drive_folder_id": drive_folder_id,
@@ -75,7 +91,9 @@ class GameProfile:
             id=_clean_string(payload.get("id"), "id"),
             display_name=_clean_string(payload.get("display_name"), "display_name"),
             game_exe_path=_clean_string(payload.get("game_exe_path"), "game_exe_path"),
-            save_file_path=_clean_string(payload.get("save_file_path"), "save_file_path"),
+            save_folder_path=normalize_save_folder_path(
+                payload.get("save_folder_path", payload.get("save_file_path"))
+            ),
             game_process_names=normalize_process_names(payload.get("game_process_names")),
             drive_filename=_clean_string(payload.get("drive_filename"), "drive_filename"),
             drive_folder_id=_clean_string(
@@ -96,6 +114,8 @@ class GameProfile:
             raise ValidationError("Aktuell wird nur 'google_drive' unterstützt.")
         if not Path(self.game_exe_path).suffix:
             raise ValidationError("'game_exe_path' muss auf eine ausführbare Datei zeigen.")
+        if not self.drive_filename.lower().endswith(".zip"):
+            raise ValidationError("'drive_filename' muss auf '.zip' enden.")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -105,7 +125,7 @@ class GameProfile:
 class AppConfig:
     profiles: list[GameProfile] = field(default_factory=list)
     selected_profile_id: str = ""
-    theme_mode: str = "light"
+    theme_mode: str = "dark"
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "AppConfig":
@@ -117,7 +137,7 @@ class AppConfig:
         config = cls(
             profiles=profiles,
             selected_profile_id=str(payload.get("selected_profile_id", "")).strip(),
-            theme_mode=str(payload.get("theme_mode", "light")).strip() or "light",
+            theme_mode=str(payload.get("theme_mode", "dark")).strip() or "dark",
         )
         config.validate()
         return config

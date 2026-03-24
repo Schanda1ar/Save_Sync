@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 import pytest
 
@@ -36,6 +36,17 @@ def test_snapshot_path_changes_when_directory_file_is_removed(tmp_path: Path) ->
 
     initial = snapshot_path(save_dir)
     (save_dir / "b.sav").unlink()
+
+    assert snapshot_path(save_dir) != initial
+
+
+def test_snapshot_path_changes_when_directory_file_is_added(tmp_path: Path) -> None:
+    save_dir = tmp_path / "save"
+    save_dir.mkdir()
+    (save_dir / "a.sav").write_text("first", encoding="utf-8")
+
+    initial = snapshot_path(save_dir)
+    (save_dir / "b.sav").write_text("second", encoding="utf-8")
 
     assert snapshot_path(save_dir) != initial
 

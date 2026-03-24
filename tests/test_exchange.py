@@ -1,4 +1,4 @@
-import json
+﻿import json
 from pathlib import Path
 
 import pytest
@@ -12,9 +12,9 @@ def build_profile() -> GameProfile:
         profile_id="game-1",
         display_name="Example Game",
         game_exe_path="C:/Games/Game.exe",
-        save_file_path="C:/Saves/game.sav",
+        save_folder_path="C:/Saves/Game",
         game_process_names=["Game.exe"],
-        drive_filename="game.sav",
+        drive_filename="game.zip",
         drive_folder_id="folder-1",
     )
 
@@ -27,6 +27,7 @@ def test_export_and_import_profiles_roundtrip(tmp_path: Path) -> None:
 
     assert len(imported) == 1
     assert imported[0].display_name == "Example Game"
+    assert imported[0].save_folder_path == str(Path("C:/Saves/Game"))
 
 
 def test_import_rejects_duplicate_ids(tmp_path: Path) -> None:
@@ -36,3 +37,30 @@ def test_import_rejects_duplicate_ids(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError):
         import_profiles(target)
+
+
+def test_import_supports_legacy_save_file_path_field(tmp_path: Path) -> None:
+    target = tmp_path / "profiles.json"
+    target.write_text(
+        json.dumps(
+            {
+                "profiles": [
+                    {
+                        "id": "legacy",
+                        "display_name": "Legacy Game",
+                        "game_exe_path": "C:/Games/Game.exe",
+                        "save_file_path": "C:/Saves/Game/save.sav",
+                        "game_process_names": ["Game.exe"],
+                        "drive_filename": "legacy.zip",
+                        "drive_folder_id": "folder-1",
+                        "cloud_provider": "google_drive",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    imported = import_profiles(target)
+
+    assert imported[0].save_folder_path == str(Path("C:/Saves/Game"))

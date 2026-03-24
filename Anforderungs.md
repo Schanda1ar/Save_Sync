@@ -28,14 +28,15 @@ Die Anwendung muss mehrere Spieleprofile verwalten kÃ¶nnen. Jedes Profil besch
 Ein Profil muss mindestens folgende Felder enthalten:
 - Anzeigename des Spiels
 - Pfad zur Spiel-Executable
-- Pfad zur Save-Datei oder zum Save-Speicherort
+- Pfad zum Save-Ordner
 - Prozessname oder Liste von Prozessnamen zur Erkennung, ob das Spiel lÃ¤uft
 - Dateiname auf Google Drive
 - Google-Drive-Ordner-ID als Zielordner
 
-Wichtig f?r Save-Daten:
-- ein Spielprofil muss sowohl einzelne Save-Dateien als auch komplette Save-Ordner unterst?tzen
-- wenn ein Save-Ordner verwendet wird, m?ssen alle relevanten Dateien im Ordner in die Synchronisationslogik einbezogen werden
+Wichtig für Save-Daten:
+- ein Spielprofil verweist immer auf einen Save-Ordner
+- auch wenn ein Spiel praktisch nur eine Datei nutzt, wird deren Elternordner als Save-Ordner konfiguriert
+- alle relevanten Dateien im Ordner müssen in die Synchronisationslogik einbezogen werden
 
 Die UI muss folgende Funktionen anbieten:
 - neues Spielprofil anlegen
@@ -72,7 +73,7 @@ Der Nutzer muss den Speicherort in Google Drive selbst festlegen kÃ¶nnen.
 
 Dazu muss pro Spielprofil konfigurierbar sein:
 - in welchen Google-Drive-Ordner synchronisiert wird
-- unter welchem Dateinamen die Save-Datei in der Cloud gespeichert wird
+- unter welchem Dateinamen das ZIP-Archiv des Save-Ordners in der Cloud gespeichert wird
 
 Die bisher bereits bekannte Ordner-ID-Logik soll erhalten bleiben, aber nicht mehr hart oder indirekt fest im Code hÃ¤ngen.
 
@@ -102,12 +103,13 @@ Der bestehende Grundablauf bleibt erhalten und soll in die neue Architektur Ã¼
 5. Nach Spielende lokalen Save erneut prÃ¼fen
 6. Nur bei Ã„nderung hochladen
 
-F?r Spiele mit mehreren Save-Dateien gilt zus?tzlich:
-- wenn der konfigurierte Save-Pfad ein Ordner ist, muss ?ber alle Dateien im Ordner iteriert werden
-- f?r jede Datei muss ein Hash berechnet und mit dem Cloud-Stand verglichen werden
-- sobald mindestens eine Datei unterschiedlich ist, muss die normale Sync-Logik f?r das betroffene Spiel greifen
+Für jeden Save-Ordner gilt:
+- es muss über alle Dateien im Ordner iteriert werden
+- für jede Datei muss ein Hash berechnet und mit dem Cloud-Stand verglichen werden
+- sobald mindestens eine Datei unterschiedlich ist, muss die normale Sync-Logik für das betroffene Spiel greifen
 - der Vergleich darf nicht nur auf eine einzelne Datei reduziert werden
-- neue, fehlende oder gel?schte Dateien im Save-Ordner m?ssen als ?nderung erkannt werden
+- neue, fehlende oder gelöschte Dateien im Save-Ordner müssen als Änderung erkannt werden
+- in Google Drive wird der Save-Ordner als ZIP-Archiv gespeichert und zum Vergleich wieder entpackt
 
 ZusÃ¤tzlich soll die UI den Status sichtbar machen, zum Beispiel:
 - bereit
@@ -124,10 +126,9 @@ ZusÃ¤tzlich soll die UI den Status sichtbar machen, zum Beispiel:
 - ein klar sichtbarer Start-Button, der das im Dropdown gewÃ¤hlte Spiel startet
 - Formularansicht zum Erstellen und Bearbeiten eines Profils
 - sichtbare Felder fÃ¼r alle relevanten Pfade und Google-Drive-Einstellungen
-- MÃ¶glichkeit zur Dateiauswahl fÃ¼r lokale Pfade
+- Möglichkeit zur Ordnerauswahl für den Save-Ordner und Dateiauswahl für die Spiel-Executable
 - Statusanzeige fÃ¼r Sync und Authentifizierung
-- ein Darkmode muss verf?gbar sein
-- ein gut sichtbarer Button zum Umschalten zwischen Lightmode und Darkmode muss vorhanden sein
+- die UI läuft ausschließlich im Darkmode
 - klare Fehlermeldungen bei ungÃ¼ltigen Eingaben oder fehlenden Dateien
 
 ## Nicht-Ziele fÃ¼r die erste Ausbaustufe
@@ -142,7 +143,7 @@ Ein Spieleprofil soll mindestens folgende Daten enthalten:
 - `id`
 - `display_name`
 - `game_exe_path`
-- `save_file_path`
+- `save_folder_path`
 - `game_process_names`
 - `drive_filename`
 - `drive_folder_id`
@@ -150,7 +151,7 @@ Ein Spieleprofil soll mindestens folgende Daten enthalten:
 
 Vorgabe:
 - `cloud_provider` ist in Version 1 fest auf `google_drive`
-- `save_file_path` darf entweder auf eine einzelne Datei oder auf einen kompletten Save-Ordner zeigen
+- `save_folder_path` darf entweder auf eine einzelne Datei oder auf einen kompletten Save-Ordner zeigen
 
 ## Beispiel fÃ¼r ein austauschbares JSON-Profil
 ```json
@@ -160,9 +161,9 @@ Vorgabe:
       "id": "my-game-1",
       "display_name": "Mein Spiel",
       "game_exe_path": "C:/Games/MyGame/Game.exe",
-      "save_file_path": "C:/Users/User/Documents/MyGame/save.sav",
+      "save_folder_path": "C:/Users/User/Documents/MyGame/SaveGames",
       "game_process_names": ["Game.exe"],
-      "drive_filename": "save.sav",
+      "drive_filename": "mygame_save.zip",
       "drive_folder_id": "1AbCdEfGhIjKlMnOp",
       "cloud_provider": "google_drive"
     }
@@ -174,8 +175,7 @@ Vorgabe:
 - Es kÃ¶nnen mehrere Spieleprofile Ã¼ber die UI angelegt und gespeichert werden.
 - Spiele kÃ¶nnen Ã¼ber ein Dropdown ausgewÃ¤hlt werden.
 - Das im Dropdown gewÃ¤hlte Spiel kann Ã¼ber einen Start-Button gestartet werden.
-- Die Anwendung bietet einen Darkmode.
-- Der Nutzer kann den Darkmode ?ber einen sichtbaren Button im UI ein- und ausschalten.
+- Die Anwendung läuft standardmäßig und ausschließlich im Darkmode.
 - Ein Nutzer kann ein Profil auswÃ¤hlen und eine Synchronisierung auslÃ¶sen.
 - Die Anwendung kann ein Profil als JSON exportieren.
 - Die Anwendung kann ein gÃ¼ltiges JSON-Profil importieren.
@@ -206,11 +206,8 @@ Vorgabe:
 - [x] UI zum Anlegen, Bearbeiten, Löschen und Auswählen von Profilen erstellen
 - [x] Dropdown zur Auswahl des aktiven Spiels in der Hauptansicht umsetzen
 - [x] Start-Button für das ausgewählte Spiel in der Hauptansicht umsetzen
-- [x] Datei- und Pfadauswahl in der UI integrieren
-- [ ] Darkmode für die QML-Oberfläche entwerfen und implementieren
-- [x] Button zum Umschalten zwischen Lightmode und Darkmode in der Hauptansicht umsetzen
-- [ ] Speicherung oder Wiederherstellung des gewählten Themes definieren und implementieren
-- [ ] UI-Tests bzw. manuelle Abnahme für Lightmode/Darkmode ergänzen
+- [x] Ordnerauswahl für Save-Ordner und Dateiauswahl für Spielpfade in der UI integrieren
+- [x] Darkmode als festes UI-Design für die QML-Oberfläche umsetzen
 - [x] JSON-Export für Spieleprofile implementieren
 - [x] JSON-Import mit Validierung implementieren
 - [x] Google-Drive-Ordner-ID pro Profil konfigurierbar machen
@@ -218,9 +215,10 @@ Vorgabe:
 - [x] Statusanzeige für Auth, Download, Spielstatus und Upload in der UI darstellen
 - [x] Fehlerbehandlung für fehlende Dateien, ungültige Konfiguration und Drive-Probleme ergänzen
 - [x] Synchronisationsablauf aus dem bestehenden Skript in die neue Architektur überführen
-- [ ] Save-Ordner mit mehreren Dateien in der Backend-Logik unterstützen
-- [ ] Über alle Dateien im konfigurierten Save-Ordner iterieren und pro Datei Hashes berechnen
-- [ ] Dateiänderungen, fehlende Dateien und neue Dateien im Save-Ordner als Sync-Trigger behandeln
-- [ ] Cloud-Abgleich für Mehrdatei-Saves sauber definieren und implementieren
-- [ ] Tests für Mehrdatei-Saves und ordnerbasierte Synchronisation ergänzen
+- [x] Save-Ordner mit mehreren Dateien in der Backend-Logik unterstützen
+- [x] Über alle Dateien im konfigurierten Save-Ordner iterieren und pro Datei Hashes berechnen
+- [x] Dateiänderungen, fehlende Dateien und neue Dateien im Save-Ordner als Sync-Trigger behandeln
+- [x] Cloud-Abgleich für ordnerbasierte Saves über ZIP-Archive implementieren
+- [x] Tests für Mehrdatei-Saves und ordnerbasierte Synchronisation ergänzen
 - [ ] Zusätzliche Abnahmetests für UI-Workflows, reale OAuth-Fehlerfälle und Google-Drive-Smoke-Tests durchführen
+

@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
@@ -9,24 +9,25 @@ ApplicationWindow {
     height: 760
     visible: true
     title: "Save Sync"
-    color: darkMode ? "#0f1722" : "#f4efe7"
+    color: "#0f1722"
 
-    property bool darkMode: controller.darkMode
-    property color pageStart: darkMode ? "#0f1722" : "#f7f1e7"
-    property color pageEnd: darkMode ? "#1b2635" : "#dfebf4"
-    property color sidebarBg: darkMode ? "#121a24" : "#1f2f3d"
-    property color sidebarPanelBg: darkMode ? "#1a2432" : "#304657"
-    property color contentBg: darkMode ? "#1a2230" : "#fffaf2"
-    property color titleText: darkMode ? "#f3f6fa" : "#1c2730"
-    property color bodyText: darkMode ? "#eef3f8" : "#1c2730"
-    property color mutedText: darkMode ? "#c8d0da" : "#6a7685"
-    property color controlBg: darkMode ? "#18202d" : "#ffffff"
-    property color controlBorder: darkMode ? "#506279" : "#b9c5d0"
-    property color buttonBg: darkMode ? "#273547" : "#e9eff5"
-    property color buttonHoverBg: darkMode ? "#314357" : "#dce8f4"
-    property color dangerBg: darkMode ? "#5a3131" : "#f4dede"
-    property color dangerHoverBg: darkMode ? "#6f3b3b" : "#f0caca"
-    property color buttonText: darkMode ? "#f3f6fa" : "#1c2730"
+    property bool darkMode: true
+    property color pageStart: "#0f1722"
+    property color pageEnd: "#1b2635"
+    property color sidebarBg: "#121a24"
+    property color sidebarPanelBg: "#1a2432"
+    property color contentBg: "#1a2230"
+    property color titleText: "#f5f7fb"
+    property color bodyText: "#eef3f8"
+    property color mutedText: "#c8d0da"
+    property color controlBg: "#d7dde5"
+    property color controlBorder: "#91a0b2"
+    property color buttonBg: "#cfd6df"
+    property color buttonHoverBg: "#dce2e9"
+    property color dangerBg: "#b98686"
+    property color dangerHoverBg: "#c99595"
+    property color buttonText: "#111827"
+    property color controlText: "#111827"
 
     property var selectedData: controller.selectedProfileData
 
@@ -54,7 +55,7 @@ ApplicationWindow {
         idField.text = selectedData.id || ""
         nameField.text = selectedData.display_name || ""
         exeField.text = selectedData.game_exe_path || ""
-        saveField.text = selectedData.save_file_path || ""
+        saveField.text = selectedData.save_folder_path || ""
         processField.text = selectedData.game_process_names || ""
         driveFileField.text = selectedData.drive_filename || ""
         driveFolderField.text = selectedData.drive_folder_id || ""
@@ -94,15 +95,9 @@ ApplicationWindow {
         onAccepted: exeField.text = controller.fileUrlToPath(selectedFile.toString())
     }
 
-    FileDialog {
-        id: saveDialog
-        title: "Save-Datei auswählen"
-        onAccepted: saveField.text = controller.fileUrlToPath(selectedFile.toString())
-    }
-
     FolderDialog {
         id: saveFolderDialog
-        title: "Save-Ordner ausw?hlen"
+        title: "Save-Ordner auswählen"
         onAccepted: saveField.text = controller.fileUrlToPath(selectedFolder.toString())
     }
 
@@ -141,68 +136,120 @@ ApplicationWindow {
                         color: mutedText
                     }
 
-                    Button {
-                        id: toggleThemeButton
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 36
-                        text: darkMode ? "Lightmode" : "Darkmode"
-                        onClicked: controller.toggleTheme()
-                        background: Rectangle {
-                            radius: 12
-                            color: toggleThemeButton.hovered ? buttonHoverBg : buttonBg
-                            border.color: controlBorder
-                            border.width: 1
-                        }
-                        contentItem: Text {
-                            text: toggleThemeButton.text
-                            color: buttonText
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
-                    }
-
                     ComboBox {
                         id: profileCombo
                         Layout.fillWidth: true
                         model: controller.profileOptions
                         textRole: "display_name"
                         onActivated: controller.selectProfileIndex(currentIndex)
+                        palette.button: controlBg
+                        palette.base: controlBg
+                        palette.text: controlText
+                        palette.buttonText: controlText
                     }
 
                     Button {
+                        id: startButton
                         Layout.fillWidth: true
                         text: controller.busy ? "Läuft..." : "Spiel starten"
                         enabled: !controller.busy
                         onClicked: controller.startSelectedGame()
+                        background: Rectangle {
+                            radius: 12
+                            color: startButton.hovered ? buttonHoverBg : buttonBg
+                            border.color: controlBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: startButton.text
+                            color: buttonText
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
                     }
 
                     Button {
+                        id: newProfileButton
                         Layout.fillWidth: true
                         text: "Neues Profil"
                         onClicked: {
                             controller.clearSelection()
                             window.reloadForm()
                         }
+                        background: Rectangle {
+                            radius: 12
+                            color: newProfileButton.hovered ? buttonHoverBg : buttonBg
+                            border.color: controlBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: newProfileButton.text
+                            color: buttonText
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
                     }
 
                     Button {
+                        id: importButton
                         Layout.fillWidth: true
                         text: "Import JSON"
                         onClicked: importDialog.open()
+                        background: Rectangle {
+                            radius: 12
+                            color: importButton.hovered ? buttonHoverBg : buttonBg
+                            border.color: controlBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: importButton.text
+                            color: buttonText
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
                     }
 
                     Button {
+                        id: exportButton
                         Layout.fillWidth: true
                         text: "Export JSON"
                         onClicked: exportDialog.open()
+                        background: Rectangle {
+                            radius: 12
+                            color: exportButton.hovered ? buttonHoverBg : buttonBg
+                            border.color: controlBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: exportButton.text
+                            color: buttonText
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
                     }
 
                     Button {
+                        id: deleteButton
                         Layout.fillWidth: true
                         text: "Profil löschen"
                         onClicked: controller.deleteSelectedProfile()
+                        background: Rectangle {
+                            radius: 12
+                            color: deleteButton.hovered ? dangerHoverBg : dangerBg
+                            border.color: controlBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: deleteButton.text
+                            color: "#1f1111"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
                     }
 
                     Rectangle {
@@ -263,6 +310,14 @@ ApplicationWindow {
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
                             placeholderText: "Wird automatisch erzeugt"
+                            color: controlText
+                            placeholderTextColor: "#586270"
+                            background: Rectangle {
+                                radius: 10
+                                color: controlBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
                         }
 
                         Label { text: "Anzeigename"; color: bodyText }
@@ -271,6 +326,14 @@ ApplicationWindow {
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
                             placeholderText: "z. B. Elden Ring"
+                            color: controlText
+                            placeholderTextColor: "#586270"
+                            background: Rectangle {
+                                radius: 10
+                                color: controlBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
                         }
 
                         Label { text: "Spiel-Executable"; color: bodyText }
@@ -278,29 +341,62 @@ ApplicationWindow {
                             id: exeField
                             Layout.fillWidth: true
                             placeholderText: "Pfad zur EXE"
+                            color: controlText
+                            placeholderTextColor: "#586270"
+                            background: Rectangle {
+                                radius: 10
+                                color: controlBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
                         }
                         Button {
+                            id: exePickButton
                             text: "Datei wählen"
                             onClicked: exeDialog.open()
+                            background: Rectangle {
+                                radius: 10
+                                color: exePickButton.hovered ? buttonHoverBg : buttonBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: exePickButton.text
+                                color: buttonText
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
                         }
 
-                        Label { text: "Save-Datei oder Ordner"; color: bodyText }
+                        Label { text: "Save-Ordner"; color: bodyText }
                         TextField {
                             id: saveField
                             Layout.fillWidth: true
-                            placeholderText: "Pfad zur Save-Datei oder zum Save-Ordner"
-                        }
-                        RowLayout {
-                            spacing: 8
-
-                            Button {
-                                text: "Datei"
-                                onClicked: saveDialog.open()
+                            placeholderText: "Pfad zum Save-Ordner"
+                            color: controlText
+                            placeholderTextColor: "#586270"
+                            background: Rectangle {
+                                radius: 10
+                                color: controlBg
+                                border.color: controlBorder
+                                border.width: 1
                             }
-
-                            Button {
-                                text: "Ordner"
-                                onClicked: saveFolderDialog.open()
+                        }
+                        Button {
+                            id: saveFolderButton
+                            text: "Ordner wählen"
+                            onClicked: saveFolderDialog.open()
+                            background: Rectangle {
+                                radius: 10
+                                color: saveFolderButton.hovered ? buttonHoverBg : buttonBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: saveFolderButton.text
+                                color: buttonText
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
                             }
                         }
 
@@ -310,6 +406,14 @@ ApplicationWindow {
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
                             placeholderText: "Game.exe, Launcher.exe"
+                            color: controlText
+                            placeholderTextColor: "#586270"
+                            background: Rectangle {
+                                radius: 10
+                                color: controlBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
                         }
 
                         Label { text: "Drive-Dateiname"; color: bodyText }
@@ -317,7 +421,24 @@ ApplicationWindow {
                             id: driveFileField
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
-                            placeholderText: "save.sav"
+                            placeholderText: "savegame.zip"
+                            color: controlText
+                            placeholderTextColor: "#586270"
+                            background: Rectangle {
+                                radius: 10
+                                color: controlBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
+                        }
+
+                        Label { text: "Drive-Archivname"; color: bodyText }
+                        Label {
+                            Layout.columnSpan: 2
+                            Layout.fillWidth: true
+                            text: "Der Drive-Dateiname ist immer der Name des ZIP-Archivs in Google Drive."
+                            color: mutedText
+                            wrapMode: Text.WordWrap
                         }
 
                         Label { text: "Drive-Ordner-ID"; color: bodyText }
@@ -326,12 +447,21 @@ ApplicationWindow {
                             Layout.columnSpan: 2
                             Layout.fillWidth: true
                             placeholderText: "Optional"
+                            color: controlText
+                            placeholderTextColor: "#586270"
+                            background: Rectangle {
+                                radius: 10
+                                color: controlBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
                         }
                     }
 
                     Item { Layout.fillHeight: true }
 
                     Button {
+                        id: saveProfileButton
                         Layout.alignment: Qt.AlignRight
                         text: "Profil speichern"
                         onClicked: controller.saveProfile(
@@ -343,6 +473,19 @@ ApplicationWindow {
                             driveFileField.text,
                             driveFolderField.text
                         )
+                        background: Rectangle {
+                            radius: 12
+                            color: saveProfileButton.hovered ? buttonHoverBg : buttonBg
+                            border.color: controlBorder
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: saveProfileButton.text
+                            color: buttonText
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
                     }
                 }
             }

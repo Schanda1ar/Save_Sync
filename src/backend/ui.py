@@ -1,10 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import threading
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from PySide6.QtCore import QObject, Property, QSettings, Signal, Slot
+from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from .exchange import export_profiles, import_profiles
 from .models import AppConfig, GameProfile, ValidationError
@@ -20,7 +20,6 @@ class AppController(QObject):
     busyChanged = Signal()
     statusUpdateRequested = Signal(str)
     busyUpdateRequested = Signal(bool)
-    themeChanged = Signal()
 
     def __init__(self, base_dir: Path) -> None:
         super().__init__()
@@ -28,8 +27,6 @@ class AppController(QObject):
         self._sync_service = SaveSyncService(base_dir=base_dir)
         self._status_message = "Bereit"
         self._busy = False
-        self._settings = QSettings()
-        self._dark_mode = self._settings.value("ui/dark_mode", False, type=bool)
         self.statusUpdateRequested.connect(self._apply_status)
         self.busyUpdateRequested.connect(self._apply_busy)
         self._config = self._safe_load()
@@ -59,7 +56,7 @@ class AppController(QObject):
                 "id": "",
                 "display_name": "",
                 "game_exe_path": "",
-                "save_file_path": "",
+                "save_folder_path": "",
                 "game_process_names": "",
                 "drive_filename": "",
                 "drive_folder_id": "",
@@ -81,9 +78,9 @@ class AppController(QObject):
     def busy(self) -> bool:
         return self._busy
 
-    @Property(bool, notify=themeChanged)
+    @Property(bool, constant=True)
     def darkMode(self) -> bool:
-        return self._dark_mode
+        return True
 
     @Slot(int)
     def selectProfileIndex(self, index: int) -> None:
@@ -98,26 +95,13 @@ class AppController(QObject):
         self._config.selected_profile_id = ""
         self._persist()
 
-    @Slot()
-    def toggleTheme(self) -> None:
-        self.setDarkMode(not self._dark_mode)
-
-    @Slot(bool)
-    def setDarkMode(self, enabled: bool) -> None:
-        if self._dark_mode == enabled:
-            return
-        self._dark_mode = enabled
-        self._settings.setValue("ui/dark_mode", self._dark_mode)
-        self._settings.sync()
-        self.themeChanged.emit()
-
     @Slot(str, str, str, str, str, str, str)
     def saveProfile(
         self,
         profile_id: str,
         display_name: str,
         game_exe_path: str,
-        save_file_path: str,
+        save_folder_path: str,
         process_names: str,
         drive_filename: str,
         drive_folder_id: str,
@@ -127,7 +111,7 @@ class AppController(QObject):
                 profile_id=profile_id.strip() or None,
                 display_name=display_name,
                 game_exe_path=game_exe_path,
-                save_file_path=save_file_path,
+                save_folder_path=save_folder_path,
                 game_process_names=process_names,
                 drive_filename=drive_filename,
                 drive_folder_id=drive_folder_id,
