@@ -97,12 +97,12 @@ class AppController(QObject):
             self._config.selected_profile_id = ""
         else:
             self._config.selected_profile_id = self._config.profiles[index].id
-        self._persist()
+        self._persist_selection()
 
     @Slot()
     def clearSelection(self) -> None:
         self._config.selected_profile_id = ""
-        self._persist()
+        self._persist_selection()
 
     @Slot(str, str, str, str, str, str, str)
     def saveProfile(
@@ -280,6 +280,11 @@ class AppController(QObject):
     def _persist(self) -> None:
         self._store.save(self._config)
         self.profilesChanged.emit()
+        self.selectedProfileIdChanged.emit()
+        self.selectedProfileDataChanged.emit()
+
+    def _persist_selection(self) -> None:
+        self._store.save(self._config)
         self.selectedProfileIdChanged.emit()
         self.selectedProfileDataChanged.emit()
 

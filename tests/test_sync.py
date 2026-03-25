@@ -1,10 +1,20 @@
+import hashlib
+import io
 from pathlib import Path
+import zipfile
 
 import pytest
 
 import backend.sync as sync_module
 from backend.models import GameProfile
-from backend.sync import SaveSyncService, SyncError, build_directory_manifest, manifest_digest, snapshot_path
+from backend.sync import (
+    SaveSyncService,
+    SyncError,
+    build_directory_manifest,
+    calc_hash,
+    manifest_digest,
+    snapshot_path,
+)
 
 
 def test_build_directory_manifest_captures_all_files(tmp_path: Path) -> None:
@@ -141,6 +151,143 @@ class UploadDriveFile(dict):
             raise RuntimeError("upload failed")
         if self.content is None:
             raise AssertionError("Expected open upload content")
+
+
+class DownloadDrive:
+    def __init__(self, remote_file) -> None:
+        self.remote_file = remote_file
+        self.query: dict | None = None
+
+    def ListFile(self, query: dict):
+        self.query = query
+        return DownloadListResult(self.remote_file)
+
+
+class DownloadListResult:
+    def __init__(self, remote_file) -> None:
+        self.remote_file = remote_file
+
+    def GetList(self):
+        if self.remote_file is None:
+            return []
+        return [self.remote_file]
+
+
+class RemoteArchiveFile:
+    def __init__(self, files: dict[str, bytes]) -> None:
+        self.archive_bytes = build_archive_bytes(files)
+        self.download_calls = 0
+
+    def GetContentFile(self, filename: str) -> None:
+        self.download_calls += 1
+        Path(filename).write_bytes(self.archive_bytes)
+
+
+def build_archive_bytes(files: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for relative_path, content in sorted(files.items()):
+            archive.writestr(relative_path, content)
+    return buffer.getvalue()
+
+
+def write_directory_files(root: Path, files: dict[str, bytes]) -> None:
+    for relative_path, content in files.items():
+        file_path = root / relative_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(content)
+
+
+def test_calc_hash_matches_sha256_for_large_file(tmp_path: Path) -> None:
+    payload = (b"SaveSync-Chunked-Hash" * 131072) + b"tail"
+    save_file = tmp_path / "large.sav"
+    save_file.write_bytes(payload)
+
+    assert calc_hash(save_file) == hashlib.sha256(payload).hexdigest()
+
+
+def test_download_if_needed_skips_replace_when_remote_matches_local(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    files = {"slot1.sav": b"same-content"}
+    write_directory_files(save_folder, files)
+    expected_hash = snapshot_path(save_folder)
+    drive = DownloadDrive(RemoteArchiveFile(files))
+    backups: list[Path] = []
+    replacements: list[tuple[Path, Path]] = []
+
+    monkeypatch.setattr(service, "_backup_existing", lambda folder: backups.append(folder))
+    monkeypatch.setattr(
+        service,
+        "_replace_directory",
+        lambda target, source: replacements.append((target, source)),
+    )
+
+    local_hash, cloud_hash, remote_file = service._download_if_needed(drive, profile, save_folder)
+
+    assert local_hash == expected_hash
+    assert cloud_hash == expected_hash
+    assert remote_file is drive.remote_file
+    assert drive.remote_file.download_calls == 1
+    assert backups == []
+    assert replacements == []
+
+
+def test_download_if_needed_backs_up_and_replaces_changed_remote_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    local_files = {"slot1.sav": b"old-content"}
+    remote_files = {
+        "slot1.sav": b"new-content",
+        "slot2/world.sav": b"world-state",
+    }
+    write_directory_files(save_folder, local_files)
+    old_manifest = build_directory_manifest(save_folder)
+    drive = DownloadDrive(RemoteArchiveFile(remote_files))
+    backups: list[dict[str, str]] = []
+    original_snapshot_path = sync_module.snapshot_path
+    local_snapshot_calls: list[Path] = []
+
+    def record_backup(folder: Path) -> None:
+        backups.append(build_directory_manifest(folder))
+
+    def track_snapshot(path: Path) -> str | None:
+        if path == save_folder:
+            local_snapshot_calls.append(path)
+        return original_snapshot_path(path)
+
+    monkeypatch.setattr(service, "_backup_existing", record_backup)
+    monkeypatch.setattr(sync_module, "snapshot_path", track_snapshot)
+
+    local_hash, cloud_hash, remote_file = service._download_if_needed(drive, profile, save_folder)
+
+    assert remote_file is drive.remote_file
+    assert drive.remote_file.download_calls == 1
+    assert backups == [old_manifest]
+    assert len(local_snapshot_calls) == 1
+    assert save_folder.joinpath("slot1.sav").read_bytes() == b"new-content"
+    assert save_folder.joinpath("slot2/world.sav").read_bytes() == b"world-state"
+    assert local_hash == cloud_hash == original_snapshot_path(save_folder)
 
 
 def test_upload_if_needed_creates_initial_remote_archive_without_local_changes(tmp_path: Path) -> None:

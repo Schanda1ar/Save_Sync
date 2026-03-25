@@ -197,6 +197,96 @@ def test_controller_save_profile_persists_and_selects_new_profile(
     assert controller.statusMessage == "Profil 'Steam Game' gespeichert."
 
 
+def test_controller_select_profile_index_persists_selection_without_profiles_changed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": "C:/Saves/Game",
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                },
+                {
+                    "id": "profile-2",
+                    "display_name": "Second Game",
+                    "game_exe_path": "2646461",
+                    "save_folder_path": "C:/Saves/Game2",
+                    "game_process_names": ["Game2.exe"],
+                    "drive_filename": "savegame-2.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                },
+            ],
+        }
+    )
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+
+    controller = AppController(tmp_path)
+    profiles_changed = []
+    selected_id_changed = []
+    selected_data_changed = []
+    controller.profilesChanged.connect(lambda: profiles_changed.append(True))
+    controller.selectedProfileIdChanged.connect(lambda: selected_id_changed.append(True))
+    controller.selectedProfileDataChanged.connect(lambda: selected_data_changed.append(True))
+
+    controller.selectProfileIndex(1)
+
+    assert store.config.selected_profile_id == "profile-2"
+    assert profiles_changed == []
+    assert len(selected_id_changed) == 1
+    assert len(selected_data_changed) == 1
+    assert controller.selectedProfileData["display_name"] == "Second Game"
+
+
+def test_controller_clear_selection_persists_without_profiles_changed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": "C:/Saves/Game",
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+
+    controller = AppController(tmp_path)
+    profiles_changed = []
+    selected_id_changed = []
+    selected_data_changed = []
+    controller.profilesChanged.connect(lambda: profiles_changed.append(True))
+    controller.selectedProfileIdChanged.connect(lambda: selected_id_changed.append(True))
+    controller.selectedProfileDataChanged.connect(lambda: selected_data_changed.append(True))
+
+    controller.clearSelection()
+
+    assert store.config.selected_profile_id == ""
+    assert profiles_changed == []
+    assert len(selected_id_changed) == 1
+    assert len(selected_data_changed) == 1
+    assert controller.selectedProfileData["display_name"] == ""
+
+
 def test_controller_import_profiles_updates_state(monkeypatch, tmp_path: Path) -> None:
     store = DummyStore()
     monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)

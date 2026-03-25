@@ -8,8 +8,9 @@ import subprocess
 import tempfile
 import time
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 import psutil
 
@@ -18,6 +19,7 @@ from .models import GameProfile, is_steam_game_id
 
 StatusCallback = Callable[[str], None]
 GAME_LAUNCH_TIMEOUT_SECONDS = 30
+HASH_CHUNK_SIZE = 1024 * 1024
 
 
 class SyncError(RuntimeError):
@@ -27,8 +29,16 @@ class SyncError(RuntimeError):
 def calc_hash(path: Path) -> str | None:
     if not path.exists() or not path.is_file():
         return None
+    digest = hashlib.sha256()
+    buffer = bytearray(HASH_CHUNK_SIZE)
+    view = memoryview(buffer)
     with path.open("rb") as handle:
-        return hashlib.sha256(handle.read()).hexdigest()
+        while True:
+            size = handle.readinto(buffer)
+            if not size:
+                break
+            digest.update(view[:size])
+    return digest.hexdigest()
 
 
 def build_directory_manifest(path: Path) -> dict[str, str]:
@@ -117,12 +127,11 @@ class SaveSyncService:
         cloud_hash = None
 
         if remote_file is not None:
-            cloud_hash = self._download_directory_digest(remote_file)
-
-        if cloud_hash and cloud_hash != local_hash:
-            self._backup_existing(save_folder)
-            self._download_directory(remote_file, save_folder)
-            local_hash = snapshot_path(save_folder)
+            with self._downloaded_remote_directory(remote_file) as (cloud_hash, extracted_path):
+                if cloud_hash != local_hash:
+                    self._backup_existing(save_folder)
+                    self._replace_directory(save_folder, extracted_path)
+                    local_hash = cloud_hash
 
         return local_hash, cloud_hash, remote_file
 
@@ -225,7 +234,8 @@ class SaveSyncService:
                 return True
         return False
 
-    def _download_directory_digest(self, remote_file) -> str | None:
+    @contextmanager
+    def _downloaded_remote_directory(self, remote_file) -> Iterator[tuple[str, Path]]:
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             archive_path = temp_dir / "save_archive.zip"
@@ -234,18 +244,7 @@ class SaveSyncService:
             extracted_path.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(archive_path, "r") as archive:
                 archive.extractall(extracted_path)
-            return manifest_digest(build_directory_manifest(extracted_path))
-
-    def _download_directory(self, remote_file, save_folder: Path) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir_name:
-            temp_dir = Path(temp_dir_name)
-            archive_path = temp_dir / "save_archive.zip"
-            extracted_path = temp_dir / "extracted"
-            remote_file.GetContentFile(str(archive_path))
-            extracted_path.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(archive_path, "r") as archive:
-                archive.extractall(extracted_path)
-            self._replace_directory(save_folder, extracted_path)
+            yield manifest_digest(build_directory_manifest(extracted_path)), extracted_path
 
     def _upload_directory(self, drive_file, save_folder: Path) -> None:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
