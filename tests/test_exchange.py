@@ -40,19 +40,19 @@ def test_import_rejects_duplicate_ids(tmp_path: Path) -> None:
         import_profiles(target)
 
 
-def test_import_supports_legacy_save_file_path_field(tmp_path: Path) -> None:
+def test_import_requires_save_folder_path_field(tmp_path: Path) -> None:
     target = tmp_path / "profiles.json"
     target.write_text(
         json.dumps(
             {
                 "profiles": [
                     {
-                        "id": "legacy",
-                        "display_name": "Legacy Game",
+                        "id": "missing-save-folder",
+                        "display_name": "Example Game",
                         "game_exe_path": "C:/Games/Game.exe",
                         "save_file_path": "C:/Saves/Game/save.sav",
                         "game_process_names": ["Game.exe"],
-                        "drive_filename": "legacy.zip",
+                        "drive_filename": "example.zip",
                         "drive_folder_id": "folder-1",
                         "cloud_provider": "google_drive",
                     }
@@ -62,9 +62,8 @@ def test_import_supports_legacy_save_file_path_field(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    imported = import_profiles(target)
-
-    assert imported[0].save_folder_path == str(Path("C:/Saves/Game"))
+    with pytest.raises(ValidationError, match="save_folder_path"):
+        import_profiles(target)
 
 
 def test_import_normalizes_drive_filename_without_zip(tmp_path: Path) -> None:

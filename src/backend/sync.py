@@ -27,6 +27,7 @@ class SyncError(RuntimeError):
 
 
 def calc_hash(path: Path) -> str | None:
+    """Return the SHA-256 hash for a file, or ``None`` when it is missing."""
     if not path.exists() or not path.is_file():
         return None
     digest = hashlib.sha256()
@@ -42,6 +43,7 @@ def calc_hash(path: Path) -> str | None:
 
 
 def build_directory_manifest(path: Path) -> dict[str, str]:
+    """Map relative file paths to hashes so directory snapshots stay comparable."""
     if not path.exists():
         return {}
     if not path.is_dir():
@@ -54,26 +56,32 @@ def build_directory_manifest(path: Path) -> dict[str, str]:
 
 
 def manifest_digest(manifest: dict[str, str]) -> str:
+    """Collapse a manifest into a stable digest for cheap change detection."""
     payload = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def snapshot_path(path: Path) -> str | None:
+    """Return a content digest for a directory, or ``None`` when it does not exist."""
     if not path.exists():
         return None
     return manifest_digest(build_directory_manifest(path))
 
 
 def save_meta(meta_info: dict[str, str], path: Path) -> None:
+    """Persist sync metadata next to the save folder for later inspection."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(meta_info, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class SaveSyncService:
+    """Coordinate cloud download, game launch, and upload for one profile."""
+
     def __init__(self, *, base_dir: Path | None = None) -> None:
         self.drive_client = GoogleDriveClient(base_dir=base_dir)
 
     def run_profile(self, profile: GameProfile, status: StatusCallback | None = None) -> None:
+        """Sync a profile before launch, wait for the game to finish, then sync back."""
         report = status or (lambda _: None)
         save_folder = Path(profile.save_folder_path)
         meta_path = self._meta_path(save_folder)
@@ -121,6 +129,7 @@ class SaveSyncService:
         return f"title='{filename}' and trashed=false"
 
     def _download_if_needed(self, drive, profile: GameProfile, save_folder: Path):
+        """Download and unpack the remote archive so its contents can be compared locally."""
         file_list = drive.ListFile({"q": self._query(profile)}).GetList()
         remote_file = file_list[0] if file_list else None
         local_hash = snapshot_path(save_folder)
@@ -129,6 +138,7 @@ class SaveSyncService:
         if remote_file is not None:
             with self._downloaded_remote_directory(remote_file) as (cloud_hash, extracted_path):
                 if cloud_hash != local_hash:
+                    # Keep a timestamped backup before the cloud version replaces local saves.
                     self._backup_existing(save_folder)
                     self._replace_directory(save_folder, extracted_path)
                     local_hash = cloud_hash
@@ -146,6 +156,7 @@ class SaveSyncService:
         cloud_hash: str | None,
         remote_file,
     ) -> None:
+        """Upload the save folder unless nothing changed locally or in the cloud."""
         if final_hash is None:
             raise SyncError(f"Save-Ordner nicht gefunden: {save_folder}")
         if remote_file is not None and final_hash == initial_hash:
@@ -173,6 +184,7 @@ class SaveSyncService:
         process: subprocess.Popen | None,
         report: StatusCallback,
     ) -> None:
+        """Wait until the launched game fully exits before continuing with upload."""
         launched = self._wait_for_game_launch(profile, process)
         if not launched:
             raise SyncError("Spielprozess wurde nach dem Start nicht erkannt.")
@@ -195,6 +207,7 @@ class SaveSyncService:
         profile: GameProfile,
         process: subprocess.Popen | None,
     ) -> bool:
+        """Treat either the spawned process or a known game process name as a successful launch."""
         deadline = time.monotonic() + GAME_LAUNCH_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             if self._any_game_process_running(profile):
@@ -205,6 +218,7 @@ class SaveSyncService:
         return False
 
     def _launch_game(self, profile: GameProfile) -> subprocess.Popen | None:
+        """Launch the profile target directly or via a Steam URI."""
         target = profile.game_exe_path
         if self._is_steam_target(target):
             self._open_steam_uri(self._steam_uri(target))
@@ -236,6 +250,7 @@ class SaveSyncService:
 
     @contextmanager
     def _downloaded_remote_directory(self, remote_file) -> Iterator[tuple[str, Path]]:
+        """Yield the extracted cloud archive together with its directory digest."""
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
             archive_path = temp_dir / "save_archive.zip"
@@ -247,6 +262,7 @@ class SaveSyncService:
             yield manifest_digest(build_directory_manifest(extracted_path)), extracted_path
 
     def _upload_directory(self, drive_file, save_folder: Path) -> None:
+        """Archive a save directory as ZIP and upload it to the configured Drive file."""
         with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
             archive_path = Path(temp_file.name)
         try:

@@ -21,6 +21,8 @@ from .sync import SaveSyncService, SyncError
 
 
 class AppController(QObject):
+    """Expose profile management and sync actions to the QML frontend."""
+
     profilesChanged = Signal()
     selectedProfileDataChanged = Signal()
     selectedProfileIdChanged = Signal()
@@ -40,6 +42,7 @@ class AppController(QObject):
         self._config = self._safe_load()
 
     def _safe_load(self) -> AppConfig:
+        """Load persisted config and recover with an empty config on fatal errors."""
         try:
             config = self._store.load()
         except Exception as exc:
@@ -115,6 +118,7 @@ class AppController(QObject):
         drive_filename: str,
         drive_folder_id: str,
     ) -> None:
+        """Create or update the selected profile from the form fields."""
         try:
             profile = GameProfile.create(
                 profile_id=profile_id.strip() or None,
@@ -154,6 +158,7 @@ class AppController(QObject):
 
     @Slot(str)
     def importProfiles(self, source_url: str) -> None:
+        """Import profiles from JSON and reject duplicate profile IDs."""
         path = self._file_url_to_path(source_url)
         if not path:
             self._set_status("Kein Importpfad ausgewählt.")
@@ -178,6 +183,7 @@ class AppController(QObject):
 
     @Slot(str)
     def exportProfiles(self, target_url: str) -> None:
+        """Export all current profiles to the chosen JSON file."""
         path = self._file_url_to_path(target_url)
         if not path:
             self._set_status("Kein Exportpfad ausgewählt.")
@@ -213,6 +219,7 @@ class AppController(QObject):
 
     @Slot()
     def startSelectedGame(self) -> None:
+        """Run the sync lifecycle for the selected profile on a background thread."""
         profile = self._config.get_profile(self._config.selected_profile_id)
         if profile is None:
             self._set_status("Kein Spiel ausgewählt.")
@@ -224,6 +231,7 @@ class AppController(QObject):
         self._set_busy(True)
 
         def worker() -> None:
+            # The sync workflow can block on I/O and process waits, so it must stay off the UI thread.
             try:
                 self._sync_service.run_profile(profile, self.statusUpdateRequested.emit)
             except (SyncError, ValidationError, OSError, Exception) as exc:
@@ -243,6 +251,7 @@ class AppController(QObject):
         drive_filename: str,
         drive_folder_id: str,
     ) -> bool:
+        """Compare the normalized form values with the stored profile state."""
         current_data = {
             "display_name": self._normalized_or_stripped(display_name),
             "game_exe_path": self._normalized_or_stripped(
@@ -305,6 +314,7 @@ class AppController(QObject):
         self.busyChanged.emit()
 
     def _file_url_to_path(self, source_url: str) -> str:
+        """Convert file URLs from QML dialogs into a local filesystem path."""
         if not source_url:
             return ""
         if "://" not in source_url:

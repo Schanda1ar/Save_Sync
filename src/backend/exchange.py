@@ -7,11 +7,13 @@ from .models import GameProfile, ValidationError
 
 
 def export_profiles(profiles: list[GameProfile], destination: Path) -> None:
+    """Write profiles to a portable JSON export file."""
     payload = {"profiles": [profile.to_dict() for profile in profiles]}
     destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def import_profiles(source: Path) -> list[GameProfile]:
+    """Load profiles from a JSON export file and validate uniqueness."""
     try:
         payload = json.loads(source.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:

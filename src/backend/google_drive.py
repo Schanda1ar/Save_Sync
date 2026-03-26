@@ -13,16 +13,20 @@ class GoogleDriveAuthError(RuntimeError):
 
 
 class GoogleDriveClient:
+    """Create authenticated Google Drive clients with credential fallback handling."""
+
     def __init__(self, *, base_dir: Path | None = None) -> None:
         self.base_dir = base_dir
         self._credentials_path = credentials_path()
         self._client_secrets_path = client_secrets_path(base_dir)
 
     def build_drive(self) -> GoogleDrive:
+        """Build an authenticated Google Drive instance."""
         gauth = self._build_auth()
         return GoogleDrive(gauth)
 
     def _build_auth(self) -> GoogleAuth:
+        """Load, refresh, or recreate OAuth credentials as needed."""
         if not self._client_secrets_path.exists():
             raise GoogleDriveAuthError(
                 f"client_secrets.json nicht gefunden: {self._client_secrets_path}"
@@ -47,6 +51,7 @@ class GoogleDriveClient:
                 gauth.SaveCredentialsFile(str(self._credentials_path))
                 return gauth
             except Exception:
+                # A failed refresh usually means the cached token is no longer usable.
                 self._interactive_login(gauth)
                 return gauth
 
@@ -65,6 +70,7 @@ class GoogleDriveClient:
         return gauth
 
     def _interactive_login(self, gauth: GoogleAuth) -> None:
+        """Run the browser-based OAuth flow and persist the resulting credentials."""
         try:
             gauth.credentials = None
             gauth.LocalWebserverAuth()

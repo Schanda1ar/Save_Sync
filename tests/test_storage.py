@@ -5,30 +5,14 @@ from backend.models import AppConfig, GameProfile
 from backend.storage import ConfigStore
 
 
-def test_loads_legacy_config_when_json_missing(tmp_path: Path) -> None:
-    legacy = tmp_path / "config.ini"
-    legacy.write_text(
-        "\n".join(
-            [
-                "[paths]",
-                "save_file=C:/Saves/Game/save.sav",
-                "game_exe=C:/Games/Game.exe",
-                "drive_filename=game.sav",
-                "drive_folder_id=folder123",
-                "game_process_names=Game.exe,Launcher.exe",
-            ]
-        ),
-        encoding="utf-8",
-    )
+def test_load_returns_empty_config_when_json_missing(tmp_path: Path) -> None:
     store = ConfigStore(config_path=tmp_path / "profiles.json", base_dir=tmp_path)
 
     config = store.load()
 
-    assert len(config.profiles) == 1
-    assert config.profiles[0].drive_folder_id == "folder123"
-    assert config.profiles[0].game_process_names == ["Game.exe", "Launcher.exe"]
-    assert Path(config.profiles[0].save_folder_path) == Path("C:/Saves/Game")
-    assert config.profiles[0].drive_filename == "game.zip"
+    assert config == AppConfig()
+    assert config.profiles == []
+    assert config.selected_profile_id == ""
 
 
 def test_save_writes_json_config(tmp_path: Path) -> None:

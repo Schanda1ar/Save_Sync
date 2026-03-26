@@ -31,6 +31,7 @@ ApplicationWindow {
     property var selectedData: controller.selectedProfileData
 
     function syncComboSelection() {
+        // Keep the combo box aligned with the selected backend profile after imports, deletes, or reloads.
         if (controller.profileOptions.length === 0) {
             profileCombo.currentIndex = -1
             return
@@ -50,6 +51,7 @@ ApplicationWindow {
     }
 
     function reloadForm() {
+        // Copy the current backend profile into the editable form fields.
         selectedData = controller.selectedProfileData
         idField.text = selectedData.id || ""
         nameField.text = selectedData.display_name || ""
