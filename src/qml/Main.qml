@@ -112,7 +112,7 @@ ApplicationWindow {
         id: unsavedChangesDialog
         title: "Ungespeicherte Änderungen"
         text: "Die Änderungen an diesem Profil wurden noch nicht gespeichert."
-        informativeText: "Speichere das Profil zuerst, bevor du das Spiel startest."
+        informativeText: "Speichere das Profil zuerst, bevor du eine Synchronisierung oder einen Spielstart auslöst."
         buttons: MessageDialog.Ok
     }
 
@@ -539,40 +539,83 @@ ApplicationWindow {
 
                     Item { Layout.fillHeight: true }
 
-                    Button {
-                        id: startButton
+                    RowLayout {
+                        Layout.fillWidth: true
                         Layout.alignment: Qt.AlignRight
-                        Layout.minimumWidth: 260
-                        text: controller.busy ? "Läuft..." : "Spiel starten"
-                        enabled: !controller.busy
-                        implicitHeight: 68
-                        onClicked: {
-                            if (controller.hasUnsavedProfileChanges(
-                                    nameField.text,
-                                    exeField.text,
-                                    saveField.text,
-                                    processField.text,
-                                    driveFileField.text,
-                                    driveFolderField.text
-                                )) {
-                                unsavedChangesDialog.open()
-                                return
+                        spacing: 12
+
+                        Button {
+                            id: syncButton
+                            Layout.alignment: Qt.AlignRight
+                            Layout.minimumWidth: 220
+                            text: controller.busy ? "Läuft..." : "Jetzt synchronisieren"
+                            enabled: !controller.busy
+                            implicitHeight: 68
+                            onClicked: {
+                                if (controller.hasUnsavedProfileChanges(
+                                        nameField.text,
+                                        exeField.text,
+                                        saveField.text,
+                                        processField.text,
+                                        driveFileField.text,
+                                        driveFolderField.text
+                                    )) {
+                                    unsavedChangesDialog.open()
+                                    return
+                                }
+                                controller.syncSelectedProfile()
                             }
-                            controller.startSelectedGame()
+                            background: Rectangle {
+                                radius: 12
+                                color: syncButton.hovered ? buttonHoverBg : buttonBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: syncButton.text
+                                color: buttonText
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                font.bold: true
+                                font.pixelSize: 18
+                            }
                         }
-                        background: Rectangle {
-                            radius: 12
-                            color: startButton.hovered ? buttonHoverBg : buttonBg
-                            border.color: controlBorder
-                            border.width: 1
-                        }
-                        contentItem: Text {
-                            text: startButton.text
-                            color: buttonText
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            font.bold: true
-                            font.pixelSize: 18
+
+                        Button {
+                            id: startButton
+                            Layout.alignment: Qt.AlignRight
+                            Layout.minimumWidth: 260
+                            text: controller.busy ? "Läuft..." : "Spiel starten"
+                            enabled: !controller.busy
+                            implicitHeight: 68
+                            onClicked: {
+                                if (controller.hasUnsavedProfileChanges(
+                                        nameField.text,
+                                        exeField.text,
+                                        saveField.text,
+                                        processField.text,
+                                        driveFileField.text,
+                                        driveFolderField.text
+                                    )) {
+                                    unsavedChangesDialog.open()
+                                    return
+                                }
+                                controller.startSelectedGame()
+                            }
+                            background: Rectangle {
+                                radius: 12
+                                color: startButton.hovered ? buttonHoverBg : buttonBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: startButton.text
+                                color: buttonText
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                font.bold: true
+                                font.pixelSize: 18
+                            }
                         }
                     }
                 }

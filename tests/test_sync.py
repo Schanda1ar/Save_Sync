@@ -173,10 +173,14 @@ class DownloadListResult:
         return [self.remote_file]
 
 
-class RemoteArchiveFile:
-    def __init__(self, files: dict[str, bytes]) -> None:
+class RemoteArchiveFile(dict):
+    def __init__(
+        self, files: dict[str, bytes], *, modified_date: str = "2100-01-01T00:00:00.000Z"
+    ) -> None:
+        super().__init__()
         self.archive_bytes = build_archive_bytes(files)
         self.download_calls = 0
+        self["modifiedDate"] = modified_date
 
     def GetContentFile(self, filename: str) -> None:
         self.download_calls += 1
@@ -278,6 +282,7 @@ def test_download_if_needed_backs_up_and_replaces_changed_remote_once(
 
     monkeypatch.setattr(service, "_backup_existing", record_backup)
     monkeypatch.setattr(sync_module, "snapshot_path", track_snapshot)
+    monkeypatch.setattr(service, "_latest_tree_mtime", lambda path: 1_000_000_000.0)
 
     local_hash, cloud_hash, remote_file = service._download_if_needed(drive, profile, save_folder)
 
@@ -288,6 +293,85 @@ def test_download_if_needed_backs_up_and_replaces_changed_remote_once(
     assert save_folder.joinpath("slot1.sav").read_bytes() == b"new-content"
     assert save_folder.joinpath("slot2/world.sav").read_bytes() == b"world-state"
     assert local_hash == cloud_hash == original_snapshot_path(save_folder)
+
+
+def test_download_if_needed_keeps_local_save_when_it_is_newer_than_remote(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    local_files = {"slot1.sav": b"local-newer"}
+    remote_files = {"slot1.sav": b"remote-older"}
+    write_directory_files(save_folder, local_files)
+    drive = DownloadDrive(
+        RemoteArchiveFile(remote_files, modified_date="2024-01-01T00:00:00.000Z")
+    )
+    backups: list[Path] = []
+    replacements: list[tuple[Path, Path]] = []
+    expected_local_hash = snapshot_path(save_folder)
+    expected_cloud_root = tmp_path / "expected-cloud"
+    expected_cloud_root.mkdir()
+    write_directory_files(expected_cloud_root, remote_files)
+    expected_cloud_hash = snapshot_path(expected_cloud_root)
+
+    monkeypatch.setattr(service, "_latest_tree_mtime", lambda path: 1_800_000_000.0)
+    monkeypatch.setattr(service, "_backup_existing", lambda folder: backups.append(folder))
+    monkeypatch.setattr(
+        service,
+        "_replace_directory",
+        lambda target, source: replacements.append((target, source)),
+    )
+
+    local_hash, cloud_hash, remote_file = service._download_if_needed(drive, profile, save_folder)
+
+    assert remote_file is drive.remote_file
+    assert cloud_hash == expected_cloud_hash
+    assert local_hash == expected_local_hash
+    assert local_hash != cloud_hash
+    assert backups == []
+    assert replacements == []
+    assert save_folder.joinpath("slot1.sav").read_bytes() == b"local-newer"
+
+
+def test_upload_if_needed_uploads_unchanged_local_save_when_cloud_is_older(tmp_path: Path) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    (save_folder / "slot1.sav").write_text("local-newer", encoding="utf-8")
+    meta_path = tmp_path / "save.meta.json"
+    existing_file = DummyDriveFile(title="save.zip")
+    uploaded: list[DummyDriveFile] = []
+
+    service._upload_directory = lambda drive_file, folder: uploaded.append(drive_file)
+
+    final_hash = snapshot_path(save_folder)
+    service._upload_if_needed(
+        drive=None,
+        profile=profile,
+        save_folder=save_folder,
+        meta_path=meta_path,
+        initial_hash=final_hash,
+        final_hash=final_hash,
+        cloud_hash="older-cloud-hash",
+        remote_file=existing_file,
+    )
+
+    assert uploaded == [existing_file]
 
 
 def test_upload_if_needed_creates_initial_remote_archive_without_local_changes(tmp_path: Path) -> None:

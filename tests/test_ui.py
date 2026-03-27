@@ -516,3 +516,88 @@ def test_controller_start_selected_game_runs_service(monkeypatch, tmp_path: Path
     assert calls == ["profile-1"]
     assert controller.statusMessage == "Abgeschlossen"
     assert controller.busy is False
+
+
+def test_controller_manual_sync_reports_sync_error(monkeypatch, tmp_path: Path) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": "C:/Saves/Game",
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+
+    class FailingSyncService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def run_profile(self, profile, status) -> None:
+            raise AssertionError("run_profile should not be used for manual sync")
+
+        def sync_profile(self, profile, status) -> None:
+            raise ui_module.SyncError("Manual sync failed")
+
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+    monkeypatch.setattr(ui_module, "SaveSyncService", FailingSyncService)
+    monkeypatch.setattr(ui_module.threading, "Thread", ImmediateThread)
+
+    controller = AppController(tmp_path)
+    controller.syncSelectedProfile()
+
+    assert controller.statusMessage == "Fehler: Manual sync failed"
+    assert controller.busy is False
+
+
+def test_controller_manual_sync_runs_service(monkeypatch, tmp_path: Path) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": "C:/Saves/Game",
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+    calls: list[str] = []
+
+    class RecordingSyncService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def run_profile(self, profile, status) -> None:
+            raise AssertionError("run_profile should not be used for manual sync")
+
+        def sync_profile(self, profile, status) -> None:
+            calls.append(profile.id)
+            status("Abgeschlossen")
+
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+    monkeypatch.setattr(ui_module, "SaveSyncService", RecordingSyncService)
+    monkeypatch.setattr(ui_module.threading, "Thread", ImmediateThread)
+
+    controller = AppController(tmp_path)
+    controller.syncSelectedProfile()
+
+    assert calls == ["profile-1"]
+    assert controller.statusMessage == "Abgeschlossen"
+    assert controller.busy is False

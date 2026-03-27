@@ -9,6 +9,7 @@ import tempfile
 import time
 import zipfile
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -83,15 +84,7 @@ class SaveSyncService:
     def run_profile(self, profile: GameProfile, status: StatusCallback | None = None) -> None:
         """Sync a profile before launch, wait for the game to finish, then sync back."""
         report = status or (lambda _: None)
-        save_folder = Path(profile.save_folder_path)
-        meta_path = self._meta_path(save_folder)
-
-        if not self._is_steam_target(profile.game_exe_path):
-            game_exe = Path(profile.game_exe_path)
-            if not game_exe.exists():
-                raise SyncError(f"Spiel-Executable nicht gefunden: {game_exe}")
-        if save_folder.exists() and not save_folder.is_dir():
-            raise SyncError(f"Save-Ordner ist ungültig: {save_folder}")
+        save_folder, meta_path = self._prepare_profile(profile, require_launch_target=True)
 
         report("Authentifizierung läuft")
         drive = self.drive_client.build_drive()
@@ -117,8 +110,47 @@ class SaveSyncService:
         )
         report("Abgeschlossen")
 
+    def sync_profile(self, profile: GameProfile, status: StatusCallback | None = None) -> None:
+        """Sync a profile without launching the game."""
+        report = status or (lambda _: None)
+        save_folder, meta_path = self._prepare_profile(profile, require_launch_target=False)
+
+        report("Authentifizierung läuft")
+        drive = self.drive_client.build_drive()
+
+        report("Download läuft")
+        initial_hash, cloud_hash, remote_file = self._download_if_needed(drive, profile, save_folder)
+
+        report("Upload läuft")
+        final_hash = snapshot_path(save_folder)
+        self._upload_if_needed(
+            drive,
+            profile,
+            save_folder,
+            meta_path,
+            initial_hash,
+            final_hash,
+            cloud_hash,
+            remote_file,
+        )
+        report("Abgeschlossen")
+
     def _meta_path(self, save_folder: Path) -> Path:
         return save_folder.parent / f"{save_folder.name}.meta.json"
+
+    def _prepare_profile(
+        self, profile: GameProfile, *, require_launch_target: bool
+    ) -> tuple[Path, Path]:
+        save_folder = Path(profile.save_folder_path)
+        meta_path = self._meta_path(save_folder)
+
+        if require_launch_target and not self._is_steam_target(profile.game_exe_path):
+            game_exe = Path(profile.game_exe_path)
+            if not game_exe.exists():
+                raise SyncError(f"Spiel-Executable nicht gefunden: {game_exe}")
+        if save_folder.exists() and not save_folder.is_dir():
+            raise SyncError(f"Save-Ordner ist ungültig: {save_folder}")
+        return save_folder, meta_path
 
     def _query(self, profile: GameProfile) -> str:
         filename = profile.drive_filename.replace("'", "\\'")
@@ -137,7 +169,9 @@ class SaveSyncService:
 
         if remote_file is not None:
             with self._downloaded_remote_directory(remote_file) as (cloud_hash, extracted_path):
-                if cloud_hash != local_hash:
+                if cloud_hash != local_hash and self._should_replace_local_save(
+                    save_folder, remote_file
+                ):
                     # Keep a timestamped backup before the cloud version replaces local saves.
                     self._backup_existing(save_folder)
                     self._replace_directory(save_folder, extracted_path)
@@ -159,9 +193,9 @@ class SaveSyncService:
         """Upload the save folder unless nothing changed locally or in the cloud."""
         if final_hash is None:
             raise SyncError(f"Save-Ordner nicht gefunden: {save_folder}")
-        if remote_file is not None and final_hash == initial_hash:
-            return
         if cloud_hash and final_hash == cloud_hash:
+            return
+        if remote_file is not None and final_hash == initial_hash == cloud_hash:
             return
 
         drive_file = remote_file
@@ -260,6 +294,36 @@ class SaveSyncService:
             with zipfile.ZipFile(archive_path, "r") as archive:
                 archive.extractall(extracted_path)
             yield manifest_digest(build_directory_manifest(extracted_path)), extracted_path
+
+    def _should_replace_local_save(self, save_folder: Path, remote_file) -> bool:
+        """Prefer the newer side when local and cloud saves differ."""
+        if not save_folder.exists():
+            return True
+
+        local_mtime = self._latest_tree_mtime(save_folder)
+        remote_mtime = self._remote_modified_timestamp(remote_file)
+        if local_mtime is None or remote_mtime is None:
+            return True
+        return remote_mtime > local_mtime
+
+    def _latest_tree_mtime(self, path: Path) -> float | None:
+        """Return the newest mtime across a directory tree, including directories for deletions."""
+        if not path.exists():
+            return None
+        latest_mtime = path.stat().st_mtime
+        for item in path.rglob("*"):
+            latest_mtime = max(latest_mtime, item.stat().st_mtime)
+        return latest_mtime
+
+    def _remote_modified_timestamp(self, remote_file) -> float | None:
+        """Parse the Google Drive modified timestamp into a comparable epoch value."""
+        modified = remote_file.get("modifiedDate")
+        if not modified:
+            return None
+        try:
+            return datetime.fromisoformat(modified.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
 
     def _upload_directory(self, drive_file, save_folder: Path) -> None:
         """Archive a save directory as ZIP and upload it to the configured Drive file."""

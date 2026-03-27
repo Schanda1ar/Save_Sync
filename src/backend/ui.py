@@ -220,12 +220,34 @@ class AppController(QObject):
     @Slot()
     def startSelectedGame(self) -> None:
         """Run the sync lifecycle for the selected profile on a background thread."""
+        self._run_selected_profile_action(
+            action=self._sync_service.run_profile,
+            missing_selection_message="Kein Spiel ausgewählt.",
+            busy_message="Synchronisierung läuft bereits.",
+        )
+
+    @Slot()
+    def syncSelectedProfile(self) -> None:
+        """Run a manual sync for the selected profile on a background thread."""
+        self._run_selected_profile_action(
+            action=self._sync_service.sync_profile,
+            missing_selection_message="Kein Profil ausgewählt.",
+            busy_message="Synchronisierung läuft bereits.",
+        )
+
+    def _run_selected_profile_action(
+        self,
+        *,
+        action,
+        missing_selection_message: str,
+        busy_message: str,
+    ) -> None:
         profile = self._config.get_profile(self._config.selected_profile_id)
         if profile is None:
-            self._set_status("Kein Spiel ausgewählt.")
+            self._set_status(missing_selection_message)
             return
         if self._busy:
-            self._set_status("Synchronisierung läuft bereits.")
+            self._set_status(busy_message)
             return
 
         self._set_busy(True)
@@ -233,7 +255,7 @@ class AppController(QObject):
         def worker() -> None:
             # The sync workflow can block on I/O and process waits, so it must stay off the UI thread.
             try:
-                self._sync_service.run_profile(profile, self.statusUpdateRequested.emit)
+                action(profile, self.statusUpdateRequested.emit)
             except (SyncError, ValidationError, OSError, Exception) as exc:
                 self.statusUpdateRequested.emit(f"Fehler: {exc}")
             finally:
