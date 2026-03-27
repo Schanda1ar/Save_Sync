@@ -21,6 +21,8 @@ from .models import GameProfile, is_steam_game_id
 StatusCallback = Callable[[str], None]
 GAME_LAUNCH_TIMEOUT_SECONDS = 30
 HASH_CHUNK_SIZE = 1024 * 1024
+RECOVERY_COPY_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
+BACKUP_MARKER_FILENAME = "savesync.backup.json"
 
 
 class SyncError(RuntimeError):
@@ -135,7 +137,46 @@ class SaveSyncService:
         )
         report("Abgeschlossen")
 
+    def list_recovery_backups(self, profile: GameProfile) -> list[Path]:
+        """Return discovered timestamped local backups for the selected profile."""
+        save_folder, _ = self._prepare_profile(profile, require_launch_target=False)
+        return self._find_recovery_backups(save_folder, profile.id)
+
+    def recover_profile_from_backup(
+        self,
+        profile: GameProfile,
+        backup_path: str | Path,
+        status: StatusCallback | None = None,
+    ) -> None:
+        """Restore one local backup and force-upload that state back to Google Drive."""
+        report = status or (lambda _: None)
+        save_folder, meta_path = self._prepare_profile(profile, require_launch_target=False)
+        backup_folder = self._validate_recovery_backup(save_folder, Path(backup_path), profile.id)
+
+        report("Authentifizierung läuft")
+        drive = self.drive_client.build_drive()
+
+        report("Drive-Archiv wird gesucht")
+        remote_file = self._find_remote_file(drive, profile)
+        if remote_file is not None:
+            report("Drive-Sicherheitskopie wird erstellt")
+            self._create_remote_recovery_copy(remote_file, profile)
+
+        report("Backup wird wiederhergestellt")
+        # Recovery intentionally restores the selected backup directly into the live save folder.
+        self._replace_directory(save_folder, backup_folder)
+
+        report("Upload läuft")
+        final_hash = snapshot_path(save_folder)
+        if final_hash is None:
+            raise SyncError(f"Save-Ordner nicht gefunden: {save_folder}")
+        drive_file = self._prepare_drive_file(drive, profile, remote_file)
+        self._upload_directory(drive_file, save_folder)
+        save_meta({"hash": final_hash, "kind": "directory"}, meta_path)
+        report("Abgeschlossen")
+
     def _meta_path(self, save_folder: Path) -> Path:
+        """Store sync metadata next to the configured save directory."""
         return save_folder.parent / f"{save_folder.name}.meta.json"
 
     def _prepare_profile(
@@ -153,6 +194,7 @@ class SaveSyncService:
         return save_folder, meta_path
 
     def _query(self, profile: GameProfile) -> str:
+        """Build the Google Drive query for one configured archive filename."""
         filename = profile.drive_filename.replace("'", "\\'")
         if profile.drive_folder_id:
             return (
@@ -160,10 +202,14 @@ class SaveSyncService:
             )
         return f"title='{filename}' and trashed=false"
 
+    def _find_remote_file(self, drive, profile: GameProfile):
+        """Return the first matching Google Drive archive for the profile, if any."""
+        file_list = drive.ListFile({"q": self._query(profile)}).GetList()
+        return file_list[0] if file_list else None
+
     def _download_if_needed(self, drive, profile: GameProfile, save_folder: Path):
         """Download and unpack the remote archive so its contents can be compared locally."""
-        file_list = drive.ListFile({"q": self._query(profile)}).GetList()
-        remote_file = file_list[0] if file_list else None
+        remote_file = self._find_remote_file(drive, profile)
         local_hash = snapshot_path(save_folder)
         cloud_hash = None
 
@@ -173,7 +219,7 @@ class SaveSyncService:
                     save_folder, remote_file
                 ):
                     # Keep a timestamped backup before the cloud version replaces local saves.
-                    self._backup_existing(save_folder)
+                    self._backup_existing(profile, save_folder)
                     self._replace_directory(save_folder, extracted_path)
                     local_hash = cloud_hash
 
@@ -198,19 +244,26 @@ class SaveSyncService:
         if remote_file is not None and final_hash == initial_hash == cloud_hash:
             return
 
-        drive_file = remote_file
-        metadata = {"title": profile.drive_filename}
-        if profile.drive_folder_id:
-            metadata["parents"] = [{"id": profile.drive_folder_id}]
-
-        if drive_file is None:
-            drive_file = drive.CreateFile(metadata)
-        else:
-            for key, value in metadata.items():
-                drive_file[key] = value
-
+        drive_file = self._prepare_drive_file(drive, profile, remote_file)
         self._upload_directory(drive_file, save_folder)
         save_meta({"hash": final_hash, "kind": "directory"}, meta_path)
+
+    def _upload_metadata(self, profile: GameProfile) -> dict[str, object]:
+        """Build the mutable Drive metadata for the configured archive target."""
+        metadata: dict[str, object] = {"title": profile.drive_filename}
+        if profile.drive_folder_id:
+            metadata["parents"] = [{"id": profile.drive_folder_id}]
+        return metadata
+
+    def _prepare_drive_file(self, drive, profile: GameProfile, remote_file):
+        """Create or retarget the Drive file object that will receive the archive upload."""
+        metadata = self._upload_metadata(profile)
+        if remote_file is None:
+            return drive.CreateFile(metadata)
+
+        for key, value in metadata.items():
+            remote_file[key] = value
+        return remote_file
 
     def _wait_for_game(
         self,
@@ -325,6 +378,110 @@ class SaveSyncService:
         except ValueError:
             return None
 
+    def _find_recovery_backups(self, save_folder: Path, profile_id: str) -> list[Path]:
+        """Scan the save folder parent for SaveSync-authored backups for one profile."""
+        backup_root = save_folder.parent
+        if not backup_root.exists():
+            return []
+
+        prefix = f"{save_folder.name}_backup_"
+        backups: list[tuple[int, Path]] = []
+        for candidate in backup_root.iterdir():
+            if not candidate.is_dir() or not candidate.name.startswith(prefix):
+                continue
+            marker = self._read_backup_marker(candidate)
+            if marker is None:
+                continue
+            if marker.get("profile_id") != profile_id:
+                continue
+            if marker.get("save_folder_name") != save_folder.name:
+                continue
+
+            timestamp = marker.get("timestamp")
+            if not isinstance(timestamp, int):
+                continue
+            backups.append((timestamp, candidate))
+
+        backups.sort(key=lambda item: item[0], reverse=True)
+        return [path for _, path in backups]
+
+    def _validate_recovery_backup(
+        self, save_folder: Path, backup_path: Path, profile_id: str
+    ) -> Path:
+        """Accept recovery only from known SaveSync-authored backups for the active profile."""
+        if not backup_path.exists():
+            raise SyncError(f"Backup-Ordner nicht gefunden: {backup_path}")
+        if not backup_path.is_dir():
+            raise SyncError(f"Backup-Ordner ist ungültig: {backup_path}")
+
+        resolved_backup = backup_path.resolve()
+        for candidate in self._find_recovery_backups(save_folder, profile_id):
+            if candidate.resolve() == resolved_backup:
+                return candidate
+        raise SyncError(f"Backup-Ordner ist kein bekanntes SaveSync-Backup: {backup_path}")
+
+    def _backup_marker_path(self, backup_path: Path) -> Path:
+        """Return the marker file path used to prove SaveSync created the backup."""
+        return backup_path / BACKUP_MARKER_FILENAME
+
+    def _write_backup_marker(
+        self,
+        backup_path: Path,
+        *,
+        profile_id: str,
+        save_folder_name: str,
+        timestamp: int,
+    ) -> None:
+        """Persist enough metadata to identify trusted SaveSync backup directories."""
+        marker_payload = {
+            "profile_id": profile_id,
+            "save_folder_name": save_folder_name,
+            "timestamp": timestamp,
+        }
+        self._backup_marker_path(backup_path).write_text(
+            json.dumps(marker_payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _read_backup_marker(self, backup_path: Path) -> dict[str, object] | None:
+        """Load the SaveSync backup marker, or ``None`` when the directory is untrusted."""
+        marker_path = self._backup_marker_path(backup_path)
+        if not marker_path.exists():
+            return None
+        try:
+            payload = json.loads(marker_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        return payload
+
+    def _create_remote_recovery_copy(self, remote_file, profile: GameProfile) -> None:
+        """Preserve the current Drive archive before a manual recovery overwrites it."""
+        remote_file.Copy(
+            target_folder=self._recovery_target_folder(profile, remote_file),
+            new_title=self._recovery_copy_title(profile.drive_filename),
+        )
+
+    def _recovery_target_folder(self, profile: GameProfile, remote_file):
+        """Prefer the configured Drive folder, otherwise reuse the current file parent."""
+        if profile.drive_folder_id:
+            return {"id": profile.drive_folder_id}
+
+        parents = remote_file.get("parents") or []
+        if not parents:
+            return None
+
+        parent_id = parents[0].get("id")
+        if not parent_id:
+            return None
+        return {"id": parent_id}
+
+    def _recovery_copy_title(self, drive_filename: str) -> str:
+        """Build a stable timestamped archive name for the pre-recovery Drive copy."""
+        timestamp = datetime.now().strftime(RECOVERY_COPY_TIMESTAMP_FORMAT)
+        return f"{Path(drive_filename).stem}_pre_recovery_{timestamp}.zip"
+
     def _upload_directory(self, drive_file, save_folder: Path) -> None:
         """Archive a save directory as ZIP and upload it to the configured Drive file."""
         with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
@@ -357,7 +514,8 @@ class SaveSyncService:
         except OSError:
             pass
 
-    def _backup_existing(self, save_folder: Path) -> None:
+    def _backup_existing(self, profile: GameProfile, save_folder: Path) -> None:
+        """Copy the current save folder into a trusted timestamped SaveSync backup directory."""
         if not save_folder.exists():
             return
         if not save_folder.is_dir():
@@ -365,6 +523,12 @@ class SaveSyncService:
         timestamp = int(time.time())
         backup_path = save_folder.parent / f"{save_folder.name}_backup_{timestamp}"
         shutil.copytree(save_folder, backup_path)
+        self._write_backup_marker(
+            backup_path,
+            profile_id=profile.id,
+            save_folder_name=save_folder.name,
+            timestamp=timestamp,
+        )
 
     def _replace_directory(self, target: Path, source: Path) -> None:
         if target.exists():

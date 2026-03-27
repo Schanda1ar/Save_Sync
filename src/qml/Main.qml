@@ -5,8 +5,10 @@ import QtQuick.Dialogs
 
 ApplicationWindow {
     id: window
-    width: 1040
-    height: 760
+    width: 1180
+    height: 860
+    minimumWidth: 1040
+    minimumHeight: 760
     visible: true
     title: "Save Sync"
     color: "#0f1722"
@@ -62,6 +64,14 @@ ApplicationWindow {
         driveFolderField.text = selectedData.drive_folder_id || ""
     }
 
+    function selectedRecoveryBackupPath() {
+        var backups = controller.recoveryBackups
+        if (!backups || recoveryBackupCombo.currentIndex < 0 || recoveryBackupCombo.currentIndex >= backups.length) {
+            return ""
+        }
+        return backups[recoveryBackupCombo.currentIndex].path || ""
+    }
+
     Component.onCompleted: {
         reloadForm()
         syncComboSelection()
@@ -72,6 +82,9 @@ ApplicationWindow {
         function onSelectedProfileDataChanged() { window.reloadForm() }
         function onProfilesChanged() { window.syncComboSelection() }
         function onSelectedProfileIdChanged() { window.syncComboSelection() }
+        function onRecoveryBackupsChanged() {
+            recoveryBackupCombo.currentIndex = controller.recoveryBackups.length > 0 ? 0 : -1
+        }
     }
 
     ToolTip {
@@ -116,6 +129,15 @@ ApplicationWindow {
         buttons: MessageDialog.Ok
     }
 
+    MessageDialog {
+        id: recoveryConfirmDialog
+        title: "Backup wiederherstellen"
+        text: "Der ausgewählte Backup-Stand ersetzt den aktuellen lokalen Save-Ordner."
+        informativeText: "Danach wird derselbe Stand nach Google Drive hochgeladen. Das aktuelle Drive-Archiv wird vorher als Sicherheitskopie gesichert."
+        buttons: MessageDialog.Ok | MessageDialog.Cancel
+        onAccepted: controller.recoverSelectedProfileFromBackup(window.selectedRecoveryBackupPath())
+    }
+
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
@@ -125,8 +147,8 @@ ApplicationWindow {
 
         RowLayout {
             anchors.fill: parent
-            anchors.margins: 24
-            spacing: 24
+            anchors.margins: 18
+            spacing: 18
 
             Rectangle {
                 Layout.preferredWidth: 320
@@ -136,8 +158,8 @@ ApplicationWindow {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 16
+                    anchors.margins: 18
+                    spacing: 12
 
                     Label {
                         text: "Spielauswahl"
@@ -347,8 +369,8 @@ ApplicationWindow {
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 24
-                    spacing: 12
+                    anchors.margins: 18
+                    spacing: 10
 
                     Label {
                         text: "Profil bearbeiten"
@@ -357,11 +379,23 @@ ApplicationWindow {
                         font.bold: true
                     }
 
-                    GridLayout {
+                    ScrollView {
+                        id: formScrollView
                         Layout.fillWidth: true
-                        columns: 3
-                        columnSpacing: 12
-                        rowSpacing: 10
+                        Layout.fillHeight: true
+                        clip: true
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                        ColumnLayout {
+                            width: formScrollView.availableWidth
+                            spacing: 10
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 3
+                            columnSpacing: 10
+                            rowSpacing: 8
 
                         Label { text: "Profil-ID"; color: bodyText }
                         TextField {
@@ -537,20 +571,49 @@ ApplicationWindow {
                         }
                     }
 
-                    Item { Layout.fillHeight: true }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                        Label {
+                            text: "Recovery-Backup"
+                            color: bodyText
+                        }
+
+                        ComboBox {
+                            id: recoveryBackupCombo
+                            Layout.fillWidth: true
+                            model: controller.recoveryBackups
+                            textRole: "label"
+                            enabled: !controller.busy && controller.recoveryBackups.length > 0
+                            currentIndex: controller.recoveryBackups.length > 0 ? 0 : -1
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            color: mutedText
+                            wrapMode: Text.WordWrap
+                            text: controller.recoveryBackups.length > 0
+                                  ? "Stellt einen vorhandenen SaveSync-Backup-Ordner lokal wieder her und lädt ihn manuell nach Drive hoch."
+                                  : "Keine SaveSync-Backups für dieses Profil gefunden."
+                        }
+                    }
+                        }
+                    }
 
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignRight
-                        spacing: 12
+                        spacing: 8
 
                         Button {
                             id: syncButton
                             Layout.alignment: Qt.AlignRight
-                            Layout.minimumWidth: 220
-                            text: controller.busy ? "Läuft..." : "Jetzt synchronisieren"
+                            Layout.preferredWidth: 110
+                            Layout.maximumWidth: 110
+                            text: controller.busy ? "Läuft..." : "Sync"
                             enabled: !controller.busy
-                            implicitHeight: 68
+                            implicitHeight: 34
                             onClicked: {
                                 if (controller.hasUnsavedProfileChanges(
                                         nameField.text,
@@ -566,7 +629,7 @@ ApplicationWindow {
                                 controller.syncSelectedProfile()
                             }
                             background: Rectangle {
-                                radius: 12
+                                radius: 10
                                 color: syncButton.hovered ? buttonHoverBg : buttonBg
                                 border.color: controlBorder
                                 border.width: 1
@@ -577,17 +640,56 @@ ApplicationWindow {
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
                                 font.bold: true
-                                font.pixelSize: 18
+                                font.pixelSize: 14
+                            }
+                        }
+
+                        Button {
+                            id: recoveryButton
+                            Layout.alignment: Qt.AlignRight
+                            Layout.preferredWidth: 160
+                            Layout.maximumWidth: 160
+                            text: controller.busy ? "Läuft..." : "Backup"
+                            enabled: !controller.busy && controller.recoveryBackups.length > 0
+                            implicitHeight: 34
+                            onClicked: {
+                                if (controller.hasUnsavedProfileChanges(
+                                        nameField.text,
+                                        exeField.text,
+                                        saveField.text,
+                                        processField.text,
+                                        driveFileField.text,
+                                        driveFolderField.text
+                                    )) {
+                                    unsavedChangesDialog.open()
+                                    return
+                                }
+                                recoveryConfirmDialog.open()
+                            }
+                            background: Rectangle {
+                                radius: 10
+                                color: recoveryButton.hovered ? buttonHoverBg : buttonBg
+                                border.color: controlBorder
+                                border.width: 1
+                            }
+                            contentItem: Text {
+                                text: recoveryButton.text
+                                color: buttonText
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                font.bold: true
+                                font.pixelSize: 14
                             }
                         }
 
                         Button {
                             id: startButton
                             Layout.alignment: Qt.AlignRight
-                            Layout.minimumWidth: 260
-                            text: controller.busy ? "Läuft..." : "Spiel starten"
+                            Layout.preferredWidth: 130
+                            Layout.maximumWidth: 130
+                            text: controller.busy ? "Läuft..." : "Spielstart"
                             enabled: !controller.busy
-                            implicitHeight: 68
+                            implicitHeight: 34
                             onClicked: {
                                 if (controller.hasUnsavedProfileChanges(
                                         nameField.text,
@@ -603,7 +705,7 @@ ApplicationWindow {
                                 controller.startSelectedGame()
                             }
                             background: Rectangle {
-                                radius: 12
+                                radius: 10
                                 color: startButton.hovered ? buttonHoverBg : buttonBg
                                 border.color: controlBorder
                                 border.width: 1
@@ -614,7 +716,7 @@ ApplicationWindow {
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
                                 font.bold: true
-                                font.pixelSize: 18
+                                font.pixelSize: 14
                             }
                         }
                     }

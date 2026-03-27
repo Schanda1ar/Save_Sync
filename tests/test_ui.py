@@ -439,6 +439,47 @@ def test_controller_detects_unsaved_changes_for_new_profile_draft(monkeypatch, t
     )
 
 
+def test_controller_exposes_recovery_backups_for_selected_profile(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": str(tmp_path / "save"),
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+    (tmp_path / "save_backup_1710000000").mkdir()
+    (tmp_path / "save_backup_1720000000").mkdir()
+    (tmp_path / "save_backup_invalid").mkdir()
+
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+
+    controller = AppController(tmp_path)
+
+    assert controller.recoveryBackups == [
+        {
+            "label": "save_backup_1720000000",
+            "path": str(tmp_path / "save_backup_1720000000"),
+        },
+        {
+            "label": "save_backup_1710000000",
+            "path": str(tmp_path / "save_backup_1710000000"),
+        },
+    ]
+
+
 def test_controller_start_selected_game_reports_sync_error(monkeypatch, tmp_path: Path) -> None:
     store = DummyStore()
     store.config = AppConfig.from_dict(
@@ -465,6 +506,9 @@ def test_controller_start_selected_game_reports_sync_error(monkeypatch, tmp_path
 
         def run_profile(self, profile, status) -> None:
             raise ui_module.SyncError("Drive upload failed")
+
+        def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
+            raise AssertionError("recover_profile_from_backup should not be used for start flow")
 
     monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
     monkeypatch.setattr(ui_module, "SaveSyncService", FailingSyncService)
@@ -505,6 +549,9 @@ def test_controller_start_selected_game_runs_service(monkeypatch, tmp_path: Path
         def run_profile(self, profile, status) -> None:
             calls.append(profile.id)
             status("Abgeschlossen")
+
+        def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
+            raise AssertionError("recover_profile_from_backup should not be used for start flow")
 
     monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
     monkeypatch.setattr(ui_module, "SaveSyncService", RecordingSyncService)
@@ -547,6 +594,9 @@ def test_controller_manual_sync_reports_sync_error(monkeypatch, tmp_path: Path) 
 
         def sync_profile(self, profile, status) -> None:
             raise ui_module.SyncError("Manual sync failed")
+
+        def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
+            raise AssertionError("recover_profile_from_backup should not be used for manual sync")
 
     monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
     monkeypatch.setattr(ui_module, "SaveSyncService", FailingSyncService)
@@ -591,6 +641,9 @@ def test_controller_manual_sync_runs_service(monkeypatch, tmp_path: Path) -> Non
             calls.append(profile.id)
             status("Abgeschlossen")
 
+        def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
+            raise AssertionError("recover_profile_from_backup should not be used for manual sync")
+
     monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
     monkeypatch.setattr(ui_module, "SaveSyncService", RecordingSyncService)
     monkeypatch.setattr(ui_module.threading, "Thread", ImmediateThread)
@@ -599,5 +652,194 @@ def test_controller_manual_sync_runs_service(monkeypatch, tmp_path: Path) -> Non
     controller.syncSelectedProfile()
 
     assert calls == ["profile-1"]
+    assert controller.statusMessage == "Abgeschlossen"
+    assert controller.busy is False
+
+
+def test_controller_manual_sync_refreshes_recovery_backups_after_new_backup(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": str(tmp_path / "save"),
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+    backup_path = tmp_path / "save_backup_1720000000"
+    state = {"created": False}
+
+    class RecordingSyncService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def list_recovery_backups(self, profile) -> list[Path]:
+            return [backup_path] if state["created"] else []
+
+        def run_profile(self, profile, status) -> None:
+            raise AssertionError("run_profile should not be used for manual sync")
+
+        def sync_profile(self, profile, status) -> None:
+            state["created"] = True
+            status("Abgeschlossen")
+
+        def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
+            raise AssertionError("recover_profile_from_backup should not be used for manual sync")
+
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+    monkeypatch.setattr(ui_module, "SaveSyncService", RecordingSyncService)
+    monkeypatch.setattr(ui_module.threading, "Thread", ImmediateThread)
+
+    controller = AppController(tmp_path)
+    assert controller.recoveryBackups == []
+
+    controller.syncSelectedProfile()
+
+    assert controller.recoveryBackups == [{"label": backup_path.name, "path": str(backup_path)}]
+
+
+def test_controller_start_selected_game_refreshes_recovery_backups_after_new_backup(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": str(tmp_path / "save"),
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+    backup_path = tmp_path / "save_backup_1720000000"
+    state = {"created": False}
+
+    class RecordingSyncService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def list_recovery_backups(self, profile) -> list[Path]:
+            return [backup_path] if state["created"] else []
+
+        def run_profile(self, profile, status) -> None:
+            state["created"] = True
+            status("Abgeschlossen")
+
+        def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
+            raise AssertionError("recover_profile_from_backup should not be used for start flow")
+
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+    monkeypatch.setattr(ui_module, "SaveSyncService", RecordingSyncService)
+    monkeypatch.setattr(ui_module.threading, "Thread", ImmediateThread)
+
+    controller = AppController(tmp_path)
+    assert controller.recoveryBackups == []
+
+    controller.startSelectedGame()
+
+    assert controller.recoveryBackups == [{"label": backup_path.name, "path": str(backup_path)}]
+
+
+def test_controller_manual_recovery_requires_backup_selection(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": "C:/Saves/Game",
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+
+    controller = AppController(tmp_path)
+    controller.recoverSelectedProfileFromBackup("")
+
+    assert controller.statusMessage == "Kein Backup ausgewählt."
+
+
+def test_controller_manual_recovery_runs_recovery_service(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = DummyStore()
+    store.config = AppConfig.from_dict(
+        {
+            "selected_profile_id": "profile-1",
+            "profiles": [
+                {
+                    "id": "profile-1",
+                    "display_name": "Example Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": "C:/Saves/Game",
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "savegame.zip",
+                    "drive_folder_id": "",
+                    "cloud_provider": "google_drive",
+                }
+            ],
+        }
+    )
+    backup_path = tmp_path / "save_backup_1720000000"
+    calls: list[tuple[str, str]] = []
+
+    class RecordingSyncService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def list_recovery_backups(self, profile) -> list[Path]:
+            return [backup_path]
+
+        def run_profile(self, profile, status) -> None:
+            raise AssertionError("run_profile should not be used for manual recovery")
+
+        def sync_profile(self, profile, status) -> None:
+            raise AssertionError("sync_profile should not be used for manual recovery")
+
+        def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
+            calls.append((profile.id, selected_backup))
+            status("Abgeschlossen")
+
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+    monkeypatch.setattr(ui_module, "SaveSyncService", RecordingSyncService)
+    monkeypatch.setattr(ui_module.threading, "Thread", ImmediateThread)
+
+    controller = AppController(tmp_path)
+    controller.recoverSelectedProfileFromBackup(str(backup_path))
+
+    assert controller.recoveryBackups == [
+        {"label": backup_path.name, "path": str(backup_path)}
+    ]
+    assert calls == [("profile-1", str(backup_path))]
     assert controller.statusMessage == "Abgeschlossen"
     assert controller.busy is False

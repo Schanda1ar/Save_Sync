@@ -11,4 +11,4 @@ wheels/
 
 *.ini
 **secrets*
-.pytest_cache/
+.pytest*/

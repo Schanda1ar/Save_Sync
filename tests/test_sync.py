@@ -135,6 +135,22 @@ class DummyDriveFile(dict):
     pass
 
 
+class CopyableDriveFile(DummyDriveFile):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.copy_calls: list[dict[str, object]] = []
+
+    def Copy(self, *, target_folder=None, new_title=None, param=None):
+        self.copy_calls.append(
+            {
+                "target_folder": target_folder,
+                "new_title": new_title,
+                "param": param,
+            }
+        )
+        return DummyDriveFile(title=new_title)
+
+
 class UploadDriveFile(dict):
     def __init__(self, *, fail_on_upload: bool = False) -> None:
         super().__init__()
@@ -161,6 +177,20 @@ class DownloadDrive:
     def ListFile(self, query: dict):
         self.query = query
         return DownloadListResult(self.remote_file)
+
+    def CreateFile(self, metadata: dict):
+        raise AssertionError("CreateFile should not be called for download-only drive usage")
+
+
+class RecoveryDrive(DownloadDrive):
+    def __init__(self, remote_file) -> None:
+        super().__init__(remote_file)
+        self.created_metadata: dict | None = None
+        self.created_file = DummyDriveFile()
+
+    def CreateFile(self, metadata: dict):
+        self.created_metadata = metadata
+        return self.created_file
 
 
 class DownloadListResult:
@@ -210,6 +240,64 @@ def test_calc_hash_matches_sha256_for_large_file(tmp_path: Path) -> None:
     assert calc_hash(save_file) == hashlib.sha256(payload).hexdigest()
 
 
+def test_list_recovery_backups_returns_timestamped_directories_newest_first(
+    tmp_path: Path,
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    backup_root = Path(profile.save_folder_path).parent
+    oldest = backup_root / "save_backup_1710000000"
+    newest = backup_root / "save_backup_1720000000"
+    spoofed = backup_root / "save_backup_1730000000"
+    unrelated = backup_root / "other_backup_9999999999"
+    for path in [oldest, newest, spoofed, unrelated]:
+        path.mkdir(parents=True, exist_ok=True)
+    service._write_backup_marker(
+        oldest,
+        profile_id=profile.id,
+        save_folder_name="save",
+        timestamp=1_710_000_000,
+    )
+    service._write_backup_marker(
+        newest,
+        profile_id=profile.id,
+        save_folder_name="save",
+        timestamp=1_720_000_000,
+    )
+
+    backups = service.list_recovery_backups(profile)
+
+    assert backups == [newest, oldest]
+
+
+def test_backup_existing_writes_trusted_marker_for_recovery(tmp_path: Path, monkeypatch) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    write_directory_files(save_folder, {"slot1.sav": b"current-save"})
+
+    monkeypatch.setattr(sync_module.time, "time", lambda: 1_720_000_000)
+
+    service._backup_existing(profile, save_folder)
+
+    backup_path = tmp_path / "save_backup_1720000000"
+    assert backup_path.exists()
+    assert service.list_recovery_backups(profile) == [backup_path]
+
+
 def test_download_if_needed_skips_replace_when_remote_matches_local(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -230,7 +318,7 @@ def test_download_if_needed_skips_replace_when_remote_matches_local(
     backups: list[Path] = []
     replacements: list[tuple[Path, Path]] = []
 
-    monkeypatch.setattr(service, "_backup_existing", lambda folder: backups.append(folder))
+    monkeypatch.setattr(service, "_backup_existing", lambda profile, folder: backups.append(folder))
     monkeypatch.setattr(
         service,
         "_replace_directory",
@@ -272,7 +360,7 @@ def test_download_if_needed_backs_up_and_replaces_changed_remote_once(
     original_snapshot_path = sync_module.snapshot_path
     local_snapshot_calls: list[Path] = []
 
-    def record_backup(folder: Path) -> None:
+    def record_backup(profile: GameProfile, folder: Path) -> None:
         backups.append(build_directory_manifest(folder))
 
     def track_snapshot(path: Path) -> str | None:
@@ -323,7 +411,7 @@ def test_download_if_needed_keeps_local_save_when_it_is_newer_than_remote(
     expected_cloud_hash = snapshot_path(expected_cloud_root)
 
     monkeypatch.setattr(service, "_latest_tree_mtime", lambda path: 1_800_000_000.0)
-    monkeypatch.setattr(service, "_backup_existing", lambda folder: backups.append(folder))
+    monkeypatch.setattr(service, "_backup_existing", lambda profile, folder: backups.append(folder))
     monkeypatch.setattr(
         service,
         "_replace_directory",
@@ -339,6 +427,108 @@ def test_download_if_needed_keeps_local_save_when_it_is_newer_than_remote(
     assert backups == []
     assert replacements == []
     assert save_folder.joinpath("slot1.sav").read_bytes() == b"local-newer"
+
+
+def test_recover_profile_from_backup_restores_local_save_and_uploads_to_existing_remote(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+        drive_folder_id="folder-123",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    write_directory_files(save_folder, {"slot1.sav": b"live-content"})
+
+    backup_folder = save_folder.parent / "save_backup_1720000000"
+    backup_folder.mkdir()
+    backup_files = {"slot1.sav": b"backup-content", "world/state.sav": b"restored"}
+    write_directory_files(backup_folder, backup_files)
+    service._write_backup_marker(
+        backup_folder,
+        profile_id=profile.id,
+        save_folder_name="save",
+        timestamp=1_720_000_000,
+    )
+
+    remote_file = CopyableDriveFile(title="save.zip", parents=[{"id": "folder-123"}])
+    drive = RecoveryDrive(remote_file)
+    uploaded: list[DummyDriveFile] = []
+
+    monkeypatch.setattr(service.drive_client, "build_drive", lambda: drive)
+    monkeypatch.setattr(service, "_upload_directory", lambda drive_file, folder: uploaded.append(drive_file))
+
+    service.recover_profile_from_backup(profile, backup_folder)
+
+    assert uploaded == [remote_file]
+    assert remote_file.copy_calls[0]["target_folder"] == {"id": "folder-123"}
+    assert str(remote_file.copy_calls[0]["new_title"]).startswith("save_pre_recovery_")
+    assert save_folder.joinpath("slot1.sav").read_bytes() == b"backup-content"
+    assert save_folder.joinpath("world/state.sav").read_bytes() == b"restored"
+    assert (tmp_path / "save.meta.json").exists()
+
+
+def test_recover_profile_from_backup_creates_remote_archive_when_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+        drive_folder_id="folder-123",
+    )
+    save_folder = Path(profile.save_folder_path)
+    backup_folder = save_folder.parent / "save_backup_1720000000"
+    backup_folder.mkdir(parents=True, exist_ok=True)
+    write_directory_files(backup_folder, {"slot1.sav": b"backup-content"})
+    service._write_backup_marker(
+        backup_folder,
+        profile_id=profile.id,
+        save_folder_name="save",
+        timestamp=1_720_000_000,
+    )
+
+    drive = RecoveryDrive(None)
+    uploaded: list[tuple[DummyDriveFile, Path]] = []
+
+    monkeypatch.setattr(service.drive_client, "build_drive", lambda: drive)
+    monkeypatch.setattr(
+        service,
+        "_upload_directory",
+        lambda drive_file, folder: uploaded.append((drive_file, folder)),
+    )
+
+    service.recover_profile_from_backup(profile, backup_folder)
+
+    assert drive.created_metadata == {
+        "title": "save.zip",
+        "parents": [{"id": "folder-123"}],
+    }
+    assert uploaded == [(drive.created_file, save_folder)]
+
+
+def test_recover_profile_from_backup_rejects_unknown_backup_directory(tmp_path: Path) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    invalid_backup = tmp_path / "manual-restore"
+    invalid_backup.mkdir()
+
+    with pytest.raises(SyncError, match="kein bekanntes SaveSync-Backup"):
+        service.recover_profile_from_backup(profile, invalid_backup)
 
 
 def test_upload_if_needed_uploads_unchanged_local_save_when_cloud_is_older(tmp_path: Path) -> None:

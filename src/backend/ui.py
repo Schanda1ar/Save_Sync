@@ -26,10 +26,12 @@ class AppController(QObject):
     profilesChanged = Signal()
     selectedProfileDataChanged = Signal()
     selectedProfileIdChanged = Signal()
+    recoveryBackupsChanged = Signal()
     statusMessageChanged = Signal()
     busyChanged = Signal()
     statusUpdateRequested = Signal(str)
     busyUpdateRequested = Signal(bool)
+    recoveryBackupsRefreshRequested = Signal()
 
     def __init__(self, base_dir: Path) -> None:
         super().__init__()
@@ -37,9 +39,12 @@ class AppController(QObject):
         self._sync_service = SaveSyncService(base_dir=base_dir)
         self._status_message = "Bereit"
         self._busy = False
+        self._recovery_backups: list[dict[str, str]] = []
         self.statusUpdateRequested.connect(self._apply_status)
         self.busyUpdateRequested.connect(self._apply_busy)
+        self.recoveryBackupsRefreshRequested.connect(self._refresh_recovery_backups)
         self._config = self._safe_load()
+        self._refresh_recovery_backups()
 
     def _safe_load(self) -> AppConfig:
         """Load persisted config and recover with an empty config on fatal errors."""
@@ -81,6 +86,11 @@ class AppController(QObject):
     @Property(str, notify=selectedProfileIdChanged)
     def selectedProfileId(self) -> str:
         return self._config.selected_profile_id
+
+    @Property("QVariantList", notify=recoveryBackupsChanged)
+    def recoveryBackups(self):
+        """Expose discovered SaveSync backup directories for the selected profile."""
+        return self._recovery_backups
 
     @Property(str, notify=statusMessageChanged)
     def statusMessage(self) -> str:
@@ -235,6 +245,20 @@ class AppController(QObject):
             busy_message="Synchronisierung läuft bereits.",
         )
 
+    @Slot(str)
+    def recoverSelectedProfileFromBackup(self, backup_path: str) -> None:
+        """Restore a selected local backup and upload it as the new manual truth."""
+        if not backup_path.strip():
+            self._set_status("Kein Backup ausgewählt.")
+            return
+        self._run_selected_profile_action(
+            action=lambda profile, status: self._sync_service.recover_profile_from_backup(
+                profile, backup_path, status
+            ),
+            missing_selection_message="Kein Profil ausgewählt.",
+            busy_message="Synchronisierung läuft bereits.",
+        )
+
     def _run_selected_profile_action(
         self,
         *,
@@ -259,6 +283,8 @@ class AppController(QObject):
             except (SyncError, ValidationError, OSError, Exception) as exc:
                 self.statusUpdateRequested.emit(f"Fehler: {exc}")
             finally:
+                # Any sync lifecycle can create a new local backup, so always refresh the list.
+                self.recoveryBackupsRefreshRequested.emit()
                 self.busyUpdateRequested.emit(False)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -313,11 +339,13 @@ class AppController(QObject):
         self.profilesChanged.emit()
         self.selectedProfileIdChanged.emit()
         self.selectedProfileDataChanged.emit()
+        self._refresh_recovery_backups()
 
     def _persist_selection(self) -> None:
         self._store.save(self._config)
         self.selectedProfileIdChanged.emit()
         self.selectedProfileDataChanged.emit()
+        self._refresh_recovery_backups()
 
     def _set_status(self, message: str) -> None:
         self._apply_status(message)
@@ -334,6 +362,30 @@ class AppController(QObject):
     def _apply_busy(self, value: bool) -> None:
         self._busy = value
         self.busyChanged.emit()
+
+    @Slot()
+    def _refresh_recovery_backups(self) -> None:
+        """Rescan local SaveSync backups for the currently selected profile."""
+        self._recovery_backups = self._load_recovery_backups()
+        self.recoveryBackupsChanged.emit()
+
+    def _load_recovery_backups(self) -> list[dict[str, str]]:
+        """Safely ask the sync service for current recovery candidates."""
+        profile = self._config.get_profile(self._config.selected_profile_id)
+        if profile is None:
+            return []
+
+        list_backups = getattr(self._sync_service, "list_recovery_backups", None)
+        if list_backups is None:
+            return []
+
+        try:
+            backups = list_backups(profile)
+        except Exception:
+            # Backup discovery should never break the main profile screen.
+            return []
+
+        return [{"label": path.name, "path": str(path)} for path in backups]
 
     def _file_url_to_path(self, source_url: str) -> str:
         """Convert file URLs from QML dialogs into a local filesystem path."""
