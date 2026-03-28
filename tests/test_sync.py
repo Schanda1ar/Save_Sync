@@ -298,6 +298,203 @@ def test_backup_existing_writes_trusted_marker_for_recovery(tmp_path: Path, monk
     assert service.list_recovery_backups(profile) == [backup_path]
 
 
+def test_backup_existing_keeps_only_two_newest_backups(tmp_path: Path, monkeypatch) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+
+    timestamps = iter([1_710_000_000, 1_720_000_000, 1_730_000_000])
+    monkeypatch.setattr(sync_module.time, "time", lambda: next(timestamps))
+
+    for index in range(3):
+        write_directory_files(save_folder, {f"slot{index}.sav": f"save-{index}".encode("utf-8")})
+        service._backup_existing(profile, save_folder)
+
+    assert service.list_recovery_backups(profile) == [
+        tmp_path / "save_backup_1730000000",
+        tmp_path / "save_backup_1720000000",
+    ]
+    assert not (tmp_path / "save_backup_1710000000").exists()
+
+
+def test_backup_existing_prunes_only_trusted_backups_for_active_profile(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    other_profile = GameProfile.create(
+        display_name="Other Game",
+        game_exe_path="C:/Games/OtherGame.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["OtherGame.exe"],
+        drive_filename="other-save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    write_directory_files(save_folder, {"slot1.sav": b"current-save"})
+
+    trusted_oldest = tmp_path / "save_backup_1710000000"
+    trusted_middle = tmp_path / "save_backup_1720000000"
+    trusted_newest = tmp_path / "save_backup_1730000000"
+    foreign_profile = tmp_path / "save_backup_1740000000"
+    untrusted = tmp_path / "save_backup_1750000000"
+    for backup_path in [
+        trusted_oldest,
+        trusted_middle,
+        foreign_profile,
+        untrusted,
+    ]:
+        backup_path.mkdir()
+        write_directory_files(backup_path, {"slot1.sav": b"backup"})
+
+    service._write_backup_marker(
+        trusted_oldest,
+        profile_id=profile.id,
+        save_folder_name="save",
+        timestamp=1_710_000_000,
+    )
+    service._write_backup_marker(
+        trusted_middle,
+        profile_id=profile.id,
+        save_folder_name="save",
+        timestamp=1_720_000_000,
+    )
+    service._write_backup_marker(
+        foreign_profile,
+        profile_id=other_profile.id,
+        save_folder_name="save",
+        timestamp=1_740_000_000,
+    )
+
+    monkeypatch.setattr(sync_module.time, "time", lambda: 1_730_000_000)
+
+    service._backup_existing(profile, save_folder)
+
+    assert service.list_recovery_backups(profile) == [trusted_newest, trusted_middle]
+    assert not trusted_oldest.exists()
+    assert foreign_profile.exists()
+    assert untrusted.exists()
+
+
+def test_backup_existing_rolls_back_new_backup_when_prune_delete_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    write_directory_files(save_folder, {"slot1.sav": b"current-save"})
+
+    oldest = tmp_path / "save_backup_1710000000"
+    middle = tmp_path / "save_backup_1720000000"
+    for backup_path, timestamp in [
+        (oldest, 1_710_000_000),
+        (middle, 1_720_000_000),
+    ]:
+        backup_path.mkdir()
+        write_directory_files(backup_path, {"slot1.sav": b"backup"})
+        service._write_backup_marker(
+            backup_path,
+            profile_id=profile.id,
+            save_folder_name="save",
+            timestamp=timestamp,
+        )
+
+    removed_paths: list[Path] = []
+    original_rmtree = sync_module.shutil.rmtree
+
+    def flaky_rmtree(path: Path, *args, **kwargs) -> None:
+        removed_paths.append(Path(path))
+        if Path(path) == oldest:
+            raise OSError("locked")
+        original_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(sync_module.time, "time", lambda: 1_730_000_000)
+    monkeypatch.setattr(sync_module.shutil, "rmtree", flaky_rmtree)
+
+    with pytest.raises(SyncError, match="Altes Backup konnte nicht gelöscht werden"):
+        service._backup_existing(profile, save_folder)
+
+    newest = tmp_path / "save_backup_1730000000"
+    assert not newest.exists()
+    assert oldest in removed_paths
+    assert service.list_recovery_backups(profile) == [middle, oldest]
+
+
+def test_backup_existing_removes_partial_backup_when_marker_write_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    write_directory_files(save_folder, {"slot1.sav": b"current-save"})
+
+    monkeypatch.setattr(sync_module.time, "time", lambda: 1_720_000_000)
+    monkeypatch.setattr(
+        service,
+        "_write_backup_marker",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("marker failed")),
+    )
+
+    with pytest.raises(OSError, match="marker failed"):
+        service._backup_existing(profile, save_folder)
+
+    assert not (tmp_path / "save_backup_1720000000").exists()
+    assert service.list_recovery_backups(profile) == []
+
+
+def test_backup_existing_avoids_name_collisions_within_same_second(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    write_directory_files(save_folder, {"slot1.sav": b"current-save"})
+
+    monkeypatch.setattr(sync_module.time, "time", lambda: 1_720_000_000)
+
+    service._backup_existing(profile, save_folder)
+    service._backup_existing(profile, save_folder)
+
+    assert service.list_recovery_backups(profile) == [
+        tmp_path / "save_backup_1720000000_0001",
+        tmp_path / "save_backup_1720000000",
+    ]
+
+
 def test_download_if_needed_skips_replace_when_remote_matches_local(
     tmp_path: Path, monkeypatch
 ) -> None:

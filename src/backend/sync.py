@@ -23,6 +23,7 @@ GAME_LAUNCH_TIMEOUT_SECONDS = 30
 HASH_CHUNK_SIZE = 1024 * 1024
 RECOVERY_COPY_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 BACKUP_MARKER_FILENAME = "savesync.backup.json"
+MAX_LOCAL_RECOVERY_BACKUPS = 2
 
 
 class SyncError(RuntimeError):
@@ -402,7 +403,8 @@ class SaveSyncService:
                 continue
             backups.append((timestamp, candidate))
 
-        backups.sort(key=lambda item: item[0], reverse=True)
+        # Use the directory name as a stable tie-breaker when backups share one-second timestamps.
+        backups.sort(key=lambda item: (item[0], item[1].name), reverse=True)
         return [path for _, path in backups]
 
     def _validate_recovery_backup(
@@ -514,21 +516,59 @@ class SaveSyncService:
         except OSError:
             pass
 
+    def _next_backup_path(self, save_folder: Path, timestamp: int) -> Path:
+        """Return a collision-safe backup directory path for one timestamped snapshot."""
+        backup_root = save_folder.parent
+        backup_name = f"{save_folder.name}_backup_{timestamp}"
+        backup_path = backup_root / backup_name
+        if not backup_path.exists():
+            return backup_path
+
+        suffix = 1
+        while True:
+            # Zero-padded suffixes keep backup names lexically ordered for stable recovery sorting.
+            candidate = backup_root / f"{backup_name}_{suffix:04d}"
+            if not candidate.exists():
+                return candidate
+            suffix += 1
+
+    def _prune_recovery_backups(self, save_folder: Path, profile_id: str) -> None:
+        """Delete older trusted backups so only the newest configured snapshots remain."""
+        backups_to_prune = self._find_recovery_backups(save_folder, profile_id)[
+            MAX_LOCAL_RECOVERY_BACKUPS:
+        ]
+        for backup_path in backups_to_prune:
+            try:
+                shutil.rmtree(backup_path)
+            except OSError as exc:
+                raise SyncError(f"Altes Backup konnte nicht gelöscht werden: {backup_path}") from exc
+
     def _backup_existing(self, profile: GameProfile, save_folder: Path) -> None:
-        """Copy the current save folder into a trusted timestamped SaveSync backup directory."""
+        """Copy the current save folder into a trusted backup directory and cap retention."""
         if not save_folder.exists():
             return
         if not save_folder.is_dir():
             raise SyncError(f"Save-Ordner ist ungültig: {save_folder}")
         timestamp = int(time.time())
-        backup_path = save_folder.parent / f"{save_folder.name}_backup_{timestamp}"
+        backup_path = self._next_backup_path(save_folder, timestamp)
         shutil.copytree(save_folder, backup_path)
-        self._write_backup_marker(
-            backup_path,
-            profile_id=profile.id,
-            save_folder_name=save_folder.name,
-            timestamp=timestamp,
-        )
+        try:
+            self._write_backup_marker(
+                backup_path,
+                profile_id=profile.id,
+                save_folder_name=save_folder.name,
+                timestamp=timestamp,
+            )
+        except Exception:
+            # Remove untrusted partial backups when the marker cannot be written.
+            shutil.rmtree(backup_path, ignore_errors=True)
+            raise
+        try:
+            self._prune_recovery_backups(save_folder, profile.id)
+        except SyncError:
+            # Roll back the new backup when retention cannot be enforced, so the cap stays intact.
+            shutil.rmtree(backup_path, ignore_errors=True)
+            raise
 
     def _replace_directory(self, target: Path, source: Path) -> None:
         if target.exists():
