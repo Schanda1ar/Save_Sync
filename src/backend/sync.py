@@ -1,8 +1,10 @@
 ﻿from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
+import socket
 import shutil
 import subprocess
 import tempfile
@@ -24,6 +26,22 @@ HASH_CHUNK_SIZE = 1024 * 1024
 RECOVERY_COPY_TIMESTAMP_FORMAT = "%Y%m%d_%H%M%S"
 BACKUP_MARKER_FILENAME = "savesync.backup.json"
 MAX_LOCAL_RECOVERY_BACKUPS = 2
+TRANSIENT_NETWORK_ERRNOS = {
+    errno.ECONNABORTED,
+    errno.ECONNRESET,
+    errno.ETIMEDOUT,
+    errno.EPIPE,
+}
+TRANSIENT_NETWORK_WINERRORS = {10053, 10054, 10060}
+TRANSIENT_NETWORK_MESSAGE_SNIPPETS = (
+    "connection aborted",
+    "connection reset",
+    "forcibly closed by the remote host",
+    "remote host closed",
+    "remotehost geschlossen",
+    "timed out",
+    "winerror 10054",
+)
 
 
 class SyncError(RuntimeError):
@@ -89,11 +107,12 @@ class SaveSyncService:
         report = status or (lambda _: None)
         save_folder, meta_path = self._prepare_profile(profile, require_launch_target=True)
 
-        report("Authentifizierung läuft")
-        drive = self.drive_client.build_drive()
-
         report("Download läuft")
-        initial_hash, cloud_hash, remote_file = self._download_if_needed(drive, profile, save_folder)
+        initial_hash, cloud_hash, _ = self._run_drive_operation(
+            lambda drive: self._download_if_needed(drive, profile, save_folder),
+            report=report,
+            retry_status="Verbindung wird erneuert",
+        )
 
         report("Spielstart")
         process = self._launch_game(profile)
@@ -101,15 +120,19 @@ class SaveSyncService:
 
         report("Upload läuft")
         final_hash = snapshot_path(save_folder)
-        self._upload_if_needed(
-            drive,
-            profile,
-            save_folder,
-            meta_path,
-            initial_hash,
-            final_hash,
-            cloud_hash,
-            remote_file,
+        self._run_drive_operation(
+            lambda drive: self._upload_if_needed(
+                drive,
+                profile,
+                save_folder,
+                meta_path,
+                initial_hash,
+                final_hash,
+                cloud_hash,
+                self._find_remote_file(drive, profile),
+            ),
+            report=report,
+            retry_status="Verbindung wird erneuert",
         )
         report("Abgeschlossen")
 
@@ -118,23 +141,28 @@ class SaveSyncService:
         report = status or (lambda _: None)
         save_folder, meta_path = self._prepare_profile(profile, require_launch_target=False)
 
-        report("Authentifizierung läuft")
-        drive = self.drive_client.build_drive()
-
         report("Download läuft")
-        initial_hash, cloud_hash, remote_file = self._download_if_needed(drive, profile, save_folder)
+        initial_hash, cloud_hash, _ = self._run_drive_operation(
+            lambda drive: self._download_if_needed(drive, profile, save_folder),
+            report=report,
+            retry_status="Verbindung wird erneuert",
+        )
 
         report("Upload läuft")
         final_hash = snapshot_path(save_folder)
-        self._upload_if_needed(
-            drive,
-            profile,
-            save_folder,
-            meta_path,
-            initial_hash,
-            final_hash,
-            cloud_hash,
-            remote_file,
+        self._run_drive_operation(
+            lambda drive: self._upload_if_needed(
+                drive,
+                profile,
+                save_folder,
+                meta_path,
+                initial_hash,
+                final_hash,
+                cloud_hash,
+                self._find_remote_file(drive, profile),
+            ),
+            report=report,
+            retry_status="Verbindung wird erneuert",
         )
         report("Abgeschlossen")
 
@@ -154,14 +182,22 @@ class SaveSyncService:
         save_folder, meta_path = self._prepare_profile(profile, require_launch_target=False)
         backup_folder = self._validate_recovery_backup(save_folder, Path(backup_path), profile.id)
 
-        report("Authentifizierung läuft")
-        drive = self.drive_client.build_drive()
-
         report("Drive-Archiv wird gesucht")
-        remote_file = self._find_remote_file(drive, profile)
+        remote_file = self._run_drive_operation(
+            lambda drive: self._find_remote_file(drive, profile),
+            report=report,
+            retry_status="Verbindung wird erneuert",
+        )
         if remote_file is not None:
             report("Drive-Sicherheitskopie wird erstellt")
-            self._create_remote_recovery_copy(remote_file, profile)
+            self._run_drive_operation(
+                lambda drive: self._create_remote_recovery_copy(
+                    self._find_remote_file(drive, profile) or remote_file,
+                    profile,
+                ),
+                report=report,
+                retry_status="Verbindung wird erneuert",
+            )
 
         report("Backup wird wiederhergestellt")
         # Recovery intentionally restores the selected backup directly into the live save folder.
@@ -171,8 +207,13 @@ class SaveSyncService:
         final_hash = snapshot_path(save_folder)
         if final_hash is None:
             raise SyncError(f"Save-Ordner nicht gefunden: {save_folder}")
-        drive_file = self._prepare_drive_file(drive, profile, remote_file)
-        self._upload_directory(drive_file, save_folder)
+        self._run_drive_operation(
+            lambda drive: self._upload_recovered_profile(
+                drive, profile, save_folder, remote_file
+            ),
+            report=report,
+            retry_status="Verbindung wird erneuert",
+        )
         save_meta({"hash": final_hash, "kind": "directory"}, meta_path)
         report("Abgeschlossen")
 
@@ -265,6 +306,58 @@ class SaveSyncService:
         for key, value in metadata.items():
             remote_file[key] = value
         return remote_file
+
+    def _run_drive_operation(self, operation, *, report: StatusCallback, retry_status: str):
+        """Run one Drive operation with a fresh client and retry one transient disconnect."""
+        report("Authentifizierung läuft")
+        drive = self.drive_client.build_drive()
+        try:
+            return operation(drive)
+        except Exception as exc:
+            if not self._is_transient_drive_error(exc):
+                raise
+        report(retry_status)
+        report("Authentifizierung läuft")
+        drive = self.drive_client.build_drive()
+        return operation(drive)
+
+    def _is_transient_drive_error(self, exc: Exception) -> bool:
+        """Return whether the exception tree looks like a short-lived network disconnect."""
+        for current in self._iter_exception_chain(exc):
+            if isinstance(
+                current, (ConnectionResetError, BrokenPipeError, TimeoutError, socket.timeout)
+            ):
+                return True
+            if isinstance(current, OSError):
+                if current.winerror in TRANSIENT_NETWORK_WINERRORS:
+                    return True
+                if current.errno in TRANSIENT_NETWORK_ERRNOS:
+                    return True
+            message = str(current).lower()
+            if any(snippet in message for snippet in TRANSIENT_NETWORK_MESSAGE_SNIPPETS):
+                return True
+        return False
+
+    def _iter_exception_chain(self, exc: BaseException) -> Iterator[BaseException]:
+        """Yield one exception and its chained causes or contexts without looping forever."""
+        seen: set[int] = set()
+        current: BaseException | None = exc
+        while current is not None and id(current) not in seen:
+            yield current
+            seen.add(id(current))
+            current = current.__cause__ or current.__context__
+
+    def _upload_recovered_profile(
+        self,
+        drive,
+        profile: GameProfile,
+        save_folder: Path,
+        remote_file,
+    ) -> None:
+        """Upload a restored save folder using a current Drive file handle."""
+        refreshed_remote_file = self._find_remote_file(drive, profile)
+        drive_file = self._prepare_drive_file(drive, profile, refreshed_remote_file or remote_file)
+        self._upload_directory(drive_file, save_folder)
 
     def _wait_for_game(
         self,

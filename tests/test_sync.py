@@ -121,6 +121,160 @@ def test_wait_for_game_launch_requires_detectable_process_for_steam_profile(
     assert service._wait_for_game_launch(profile, None) is False
 
 
+def test_run_profile_rebuilds_drive_before_post_game_upload(
+    monkeypatch, tmp_path: Path
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Steam Game",
+        game_exe_path="2646460",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    drive_sequence = iter(["download-drive", "upload-drive"])
+    build_calls: list[str] = []
+    download_calls: list[str] = []
+    lookup_calls: list[str] = []
+    upload_calls: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        service.drive_client,
+        "build_drive",
+        lambda: build_calls.append(next(drive_sequence)) or build_calls[-1],
+    )
+    monkeypatch.setattr(
+        service,
+        "_download_if_needed",
+        lambda drive, profile, save_folder: download_calls.append(drive)
+        or ("initial-hash", "cloud-hash", {"stale": True}),
+    )
+    monkeypatch.setattr(service, "_launch_game", lambda profile: None)
+    monkeypatch.setattr(service, "_wait_for_game", lambda profile, process, report: None)
+    monkeypatch.setattr(sync_module, "snapshot_path", lambda path: "final-hash")
+    monkeypatch.setattr(
+        service,
+        "_find_remote_file",
+        lambda drive, profile: lookup_calls.append(drive) or {"drive": drive},
+    )
+    monkeypatch.setattr(
+        service,
+        "_upload_if_needed",
+        lambda drive, profile, save_folder, meta_path, initial_hash, final_hash, cloud_hash, remote_file: upload_calls.append(
+            (drive, remote_file)
+        ),
+    )
+
+    service.run_profile(profile)
+
+    assert build_calls == ["download-drive", "upload-drive"]
+    assert download_calls == ["download-drive"]
+    assert lookup_calls == ["upload-drive"]
+    assert upload_calls == [("upload-drive", {"drive": "upload-drive"})]
+
+
+def test_sync_profile_retries_transient_drive_error_once(
+    monkeypatch, tmp_path: Path
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Steam Game",
+        game_exe_path="2646460",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    drive_sequence = iter(["download-drive", "upload-drive-1", "upload-drive-2"])
+    build_calls: list[str] = []
+    upload_calls: list[str] = []
+    status_updates: list[str] = []
+
+    monkeypatch.setattr(
+        service.drive_client,
+        "build_drive",
+        lambda: build_calls.append(next(drive_sequence)) or build_calls[-1],
+    )
+    monkeypatch.setattr(
+        service,
+        "_download_if_needed",
+        lambda drive, profile, save_folder: ("initial-hash", "cloud-hash", None),
+    )
+    monkeypatch.setattr(sync_module, "snapshot_path", lambda path: "final-hash")
+    monkeypatch.setattr(service, "_find_remote_file", lambda drive, profile: {"drive": drive})
+
+    def flaky_upload(
+        drive,
+        profile,
+        save_folder,
+        meta_path,
+        initial_hash,
+        final_hash,
+        cloud_hash,
+        remote_file,
+    ) -> None:
+        upload_calls.append(drive)
+        if drive == "upload-drive-1":
+            raise ConnectionResetError(10054, "forcibly closed by the remote host")
+
+    monkeypatch.setattr(service, "_upload_if_needed", flaky_upload)
+
+    service.sync_profile(profile, status_updates.append)
+
+    assert build_calls == ["download-drive", "upload-drive-1", "upload-drive-2"]
+    assert upload_calls == ["upload-drive-1", "upload-drive-2"]
+    assert status_updates[-1] == "Abgeschlossen"
+    assert "Verbindung wird erneuert" in status_updates
+
+
+def test_sync_profile_does_not_retry_non_transient_drive_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Steam Game",
+        game_exe_path="2646460",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    build_calls: list[str] = []
+    upload_calls: list[str] = []
+
+    monkeypatch.setattr(
+        service.drive_client,
+        "build_drive",
+        lambda: build_calls.append(f"drive-{len(build_calls) + 1}") or build_calls[-1],
+    )
+    monkeypatch.setattr(
+        service,
+        "_download_if_needed",
+        lambda drive, profile, save_folder: ("initial-hash", "cloud-hash", None),
+    )
+    monkeypatch.setattr(sync_module, "snapshot_path", lambda path: "final-hash")
+    monkeypatch.setattr(service, "_find_remote_file", lambda drive, profile: {"drive": drive})
+
+    def failing_upload(
+        drive,
+        profile,
+        save_folder,
+        meta_path,
+        initial_hash,
+        final_hash,
+        cloud_hash,
+        remote_file,
+    ) -> None:
+        upload_calls.append(drive)
+        raise RuntimeError("permanent failure")
+
+    monkeypatch.setattr(service, "_upload_if_needed", failing_upload)
+
+    with pytest.raises(RuntimeError, match="permanent failure"):
+        service.sync_profile(profile)
+
+    assert build_calls == ["drive-1", "drive-2"]
+    assert upload_calls == ["drive-2"]
+
+
 class DummyDrive:
     def __init__(self) -> None:
         self.created_metadata: dict | None = None
@@ -879,3 +1033,4 @@ def test_upload_directory_propagates_upload_errors(tmp_path: Path) -> None:
         service._upload_directory(drive_file, save_folder)
 
     assert drive_file.content is None
+
