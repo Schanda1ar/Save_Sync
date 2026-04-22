@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from backend.exchange import ImportProfilesResult
 from backend.models import AppConfig
 from backend.ui import AppController
 import backend.ui as ui_module
@@ -290,33 +291,81 @@ def test_controller_clear_selection_persists_without_profiles_changed(
 def test_controller_import_profiles_updates_state(monkeypatch, tmp_path: Path) -> None:
     store = DummyStore()
     monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
-    import_file = tmp_path / "import.json"
-    import_file.write_text(
-        """
+    imported_profile = AppConfig.from_dict(
         {
-          "profiles": [
-            {
-              "id": "imported",
-              "display_name": "Imported Game",
-              "game_exe_path": "2646460",
-              "save_folder_path": "C:/Saves/Game",
-              "game_process_names": ["Game.exe"],
-              "drive_filename": "imported_save",
-              "drive_folder_id": "folder-99",
-              "cloud_provider": "google_drive"
-            }
-          ]
+            "profiles": [
+                {
+                    "id": "imported",
+                    "display_name": "Imported Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": str(tmp_path / "save"),
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "imported_save",
+                    "drive_folder_id": "folder-99",
+                    "cloud_provider": "google_drive",
+                }
+            ]
         }
-        """.strip(),
-        encoding="utf-8",
+    ).profiles[0]
+    monkeypatch.setattr(
+        ui_module,
+        "import_profiles",
+        lambda source, existing_profile_ids=None: ImportProfilesResult(
+            profiles=[imported_profile],
+            rewritten_path_count=1,
+            created_directory_count=1,
+            unresolved_path_count=0,
+        ),
     )
 
     controller = AppController(tmp_path)
-    controller.importProfiles(str(import_file))
+    controller.importProfiles(str(tmp_path / "import.json"))
 
     assert len(store.config.profiles) == 1
     assert store.config.profiles[0].id == "imported"
-    assert controller.statusMessage == "1 Profil(e) importiert."
+    assert controller.statusMessage == "1 Profil(e) importiert. 1 Pfad(e) angepasst. 1 Ordner erstellt."
+
+
+def test_controller_import_profiles_reports_unresolved_paths(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = DummyStore()
+    monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
+    imported_profile = AppConfig.from_dict(
+        {
+            "profiles": [
+                {
+                    "id": "imported",
+                    "display_name": "Imported Game",
+                    "game_exe_path": "2646460",
+                    "save_folder_path": str(tmp_path / "missing-parent" / "save"),
+                    "game_process_names": ["Game.exe"],
+                    "drive_filename": "imported_save",
+                    "drive_folder_id": "folder-99",
+                    "cloud_provider": "google_drive",
+                }
+            ]
+        }
+    ).profiles[0]
+    monkeypatch.setattr(
+        ui_module,
+        "import_profiles",
+        lambda source, existing_profile_ids=None: ImportProfilesResult(
+            profiles=[imported_profile],
+            rewritten_path_count=1,
+            created_directory_count=0,
+            unresolved_path_count=1,
+        ),
+    )
+
+    controller = AppController(tmp_path)
+    controller.importProfiles(str(tmp_path / "import.json"))
+
+    assert len(store.config.profiles) == 1
+    assert controller.statusMessage == (
+        "1 Profil(e) importiert. 1 Pfad(e) angepasst. "
+        "1 Pfad(e) konnten lokal nicht vorbereitet werden."
+    )
 
 
 def test_controller_export_profiles_writes_json(monkeypatch, tmp_path: Path) -> None:
@@ -460,9 +509,14 @@ def test_controller_exposes_recovery_backups_for_selected_profile(
             ],
         }
     )
-    (tmp_path / "save_backup_1710000000").mkdir()
-    (tmp_path / "save_backup_1720000000").mkdir()
+    oldest = tmp_path / "save_backup_1710000000"
+    newest = tmp_path / "save_backup_1720000000"
+    oldest.mkdir()
+    newest.mkdir()
     (tmp_path / "save_backup_invalid").mkdir()
+    sync_service = ui_module.SaveSyncService(base_dir=tmp_path)
+    sync_service._write_backup_marker(oldest, profile_id="profile-1", save_folder_name="save", timestamp=1710000000)
+    sync_service._write_backup_marker(newest, profile_id="profile-1", save_folder_name="save", timestamp=1720000000)
 
     monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
 

@@ -1,13 +1,21 @@
 ﻿from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 from uuid import uuid4
 
 
 class ValidationError(ValueError):
     """Raised when a profile or config payload is invalid."""
+
+
+@dataclass(slots=True)
+class ImportedSaveFolderPath:
+    """Describe how an imported save-folder path was adapted for the local machine."""
+
+    path: str
+    was_rewritten: bool = False
 
 
 def _clean_string(value: Any, field_name: str, *, required: bool = True) -> str:
@@ -50,6 +58,42 @@ def normalize_save_folder_path(value: Any) -> str:
     if path.suffix:
         return str(path.parent)
     return str(path)
+
+
+def _current_user_home() -> Path:
+    """Return the current user's home directory for import-time path adaptation."""
+    return Path.home()
+
+
+def adapt_imported_save_folder_path(value: Any) -> ImportedSaveFolderPath:
+    """Rewrite imported Windows user-profile paths to the current local user when possible."""
+    normalized_path = normalize_save_folder_path(value)
+    imported_path = PureWindowsPath(normalized_path)
+    imported_parts = imported_path.parts
+    if len(imported_parts) < 4:
+        return ImportedSaveFolderPath(path=normalized_path)
+
+    if len(imported_path.drive) != 2 or not imported_path.drive.endswith(":"):
+        return ImportedSaveFolderPath(path=normalized_path)
+
+    if imported_parts[1].lower() != "users":
+        return ImportedSaveFolderPath(path=normalized_path)
+
+    current_home = PureWindowsPath(str(_current_user_home()))
+    current_parts = current_home.parts
+    if (
+        len(current_parts) < 3
+        or current_parts[1].lower() != "users"
+        or len(current_home.drive) != 2
+        or not current_home.drive.endswith(":")
+    ):
+        return ImportedSaveFolderPath(path=normalized_path)
+
+    rewritten_path = current_home.joinpath(*imported_parts[3:])
+    return ImportedSaveFolderPath(
+        path=str(rewritten_path),
+        was_rewritten=str(rewritten_path) != normalized_path,
+    )
 
 
 def normalize_drive_filename(value: Any) -> str:

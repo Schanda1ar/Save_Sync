@@ -6,7 +6,7 @@ from urllib.parse import unquote, urlparse
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
-from .exchange import export_profiles, import_profiles
+from .exchange import ImportProfilesResult, export_profiles, import_profiles
 from .models import (
     AppConfig,
     GameProfile,
@@ -168,28 +168,23 @@ class AppController(QObject):
 
     @Slot(str)
     def importProfiles(self, source_url: str) -> None:
-        """Import profiles from JSON and reject duplicate profile IDs."""
+        """Import profiles from JSON and report any local path adjustments."""
         path = self._file_url_to_path(source_url)
         if not path:
             self._set_status("Kein Importpfad ausgewählt.")
             return
+        existing_ids = {profile.id for profile in self._config.profiles}
         try:
-            imported = import_profiles(Path(path))
+            import_result = import_profiles(Path(path), existing_profile_ids=existing_ids)
         except (OSError, ValidationError) as exc:
             self._set_status(f"Import fehlgeschlagen: {exc}")
             return
 
-        existing_ids = {profile.id for profile in self._config.profiles}
-        for profile in imported:
-            if profile.id in existing_ids:
-                self._set_status(f"Import fehlgeschlagen: Profil-ID '{profile.id}' existiert bereits.")
-                return
-
-        self._config.profiles.extend(imported)
+        self._config.profiles.extend(import_result.profiles)
         if not self._config.selected_profile_id and self._config.profiles:
             self._config.selected_profile_id = self._config.profiles[0].id
         self._persist()
-        self._set_status(f"{len(imported)} Profil(e) importiert.")
+        self._set_status(self._build_import_status(import_result))
 
     @Slot(str)
     def exportProfiles(self, target_url: str) -> None:
@@ -420,6 +415,19 @@ class AppController(QObject):
             return self._display_drive_filename(normalize_drive_filename(value))
         except ValidationError:
             return value.strip()
+
+    def _build_import_status(self, import_result: ImportProfilesResult) -> str:
+        """Summarize import success together with any local path adjustments."""
+        message = f"{len(import_result.profiles)} Profil(e) importiert."
+        if import_result.rewritten_path_count:
+            message += f" {import_result.rewritten_path_count} Pfad(e) angepasst."
+        if import_result.created_directory_count:
+            message += f" {import_result.created_directory_count} Ordner erstellt."
+        if import_result.unresolved_path_count:
+            message += (
+                f" {import_result.unresolved_path_count} Pfad(e) konnten lokal nicht vorbereitet werden."
+            )
+        return message
 
     def _next_copy_name(self, base_name: str) -> str:
         existing_names = {profile.display_name for profile in self._config.profiles}
