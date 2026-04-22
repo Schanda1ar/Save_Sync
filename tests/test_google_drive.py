@@ -60,7 +60,7 @@ def test_build_auth_rejects_missing_client_secrets(tmp_path: Path) -> None:
         client._build_auth()
 
 
-def test_build_auth_refreshes_expired_token_and_persists_credentials(
+def test_build_auth_reports_status_for_expired_token_refresh(
     monkeypatch, tmp_path: Path
 ) -> None:
     client = build_client(tmp_path)
@@ -68,15 +68,23 @@ def test_build_auth_refreshes_expired_token_and_persists_credentials(
     client._credentials_path.write_text("token", encoding="utf-8")
     fake_auth = FakeGoogleAuth()
     fake_auth.access_token_expired = True
+    status_updates: list[str] = []
 
     monkeypatch.setattr(google_drive_module, "GoogleAuth", lambda: fake_auth)
 
-    result = client._build_auth()
+    result = client._build_auth(status=status_updates.append)
 
     assert result is fake_auth
     assert fake_auth.refresh_calls == 1
     assert fake_auth.local_webserver_calls == 0
     assert fake_auth.save_credentials_calls == [str(client._credentials_path)]
+    assert status_updates == [
+        "Google-Authentifizierung wird vorbereitet",
+        "Gespeicherte Anmeldedaten werden geladen",
+        "Token wird geprüft",
+        "Token wird erneuert",
+        "Google-Authentifizierung abgeschlossen",
+    ]
 
 
 def test_build_auth_falls_back_to_interactive_login_when_refresh_fails(
@@ -88,15 +96,24 @@ def test_build_auth_falls_back_to_interactive_login_when_refresh_fails(
     fake_auth = FakeGoogleAuth()
     fake_auth.access_token_expired = True
     fake_auth.refresh_exception = RuntimeError("refresh failed")
+    status_updates: list[str] = []
 
     monkeypatch.setattr(google_drive_module, "GoogleAuth", lambda: fake_auth)
 
-    result = client._build_auth()
+    result = client._build_auth(status=status_updates.append)
 
     assert result is fake_auth
     assert fake_auth.refresh_calls == 1
     assert fake_auth.local_webserver_calls == 1
     assert fake_auth.save_credentials_calls == [str(client._credentials_path)]
+    assert status_updates == [
+        "Google-Authentifizierung wird vorbereitet",
+        "Gespeicherte Anmeldedaten werden geladen",
+        "Token wird geprüft",
+        "Token wird erneuert",
+        "Browser-Anmeldung wird gestartet",
+        "Google-Authentifizierung abgeschlossen",
+    ]
 
 
 def test_build_auth_uses_refresh_after_authorize_failure(monkeypatch, tmp_path: Path) -> None:
@@ -105,16 +122,46 @@ def test_build_auth_uses_refresh_after_authorize_failure(monkeypatch, tmp_path: 
     client._credentials_path.write_text("token", encoding="utf-8")
     fake_auth = FakeGoogleAuth()
     fake_auth.authorize_exception = RuntimeError("authorize failed")
+    status_updates: list[str] = []
 
     monkeypatch.setattr(google_drive_module, "GoogleAuth", lambda: fake_auth)
 
-    result = client._build_auth()
+    result = client._build_auth(status=status_updates.append)
 
     assert result is fake_auth
     assert fake_auth.authorize_calls == 1
     assert fake_auth.refresh_calls == 1
     assert fake_auth.local_webserver_calls == 0
     assert fake_auth.save_credentials_calls == [str(client._credentials_path)]
+    assert status_updates == [
+        "Google-Authentifizierung wird vorbereitet",
+        "Gespeicherte Anmeldedaten werden geladen",
+        "Token wird geprüft",
+        "Token wird erneuert",
+        "Google-Authentifizierung abgeschlossen",
+    ]
+
+
+def test_build_auth_runs_interactive_login_without_cached_credentials(
+    monkeypatch, tmp_path: Path
+) -> None:
+    client = build_client(tmp_path)
+    client._client_secrets_path.write_text("{}", encoding="utf-8")
+    fake_auth = FakeGoogleAuth()
+    fake_auth.credentials = None
+    status_updates: list[str] = []
+
+    monkeypatch.setattr(google_drive_module, "GoogleAuth", lambda: fake_auth)
+
+    result = client._build_auth(status=status_updates.append)
+
+    assert result is fake_auth
+    assert fake_auth.local_webserver_calls == 1
+    assert status_updates == [
+        "Google-Authentifizierung wird vorbereitet",
+        "Browser-Anmeldung wird gestartet",
+        "Google-Authentifizierung abgeschlossen",
+    ]
 
 
 def test_interactive_login_wraps_login_errors(tmp_path: Path) -> None:

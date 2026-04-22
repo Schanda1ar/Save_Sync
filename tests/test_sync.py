@@ -141,12 +141,12 @@ def test_run_profile_rebuilds_drive_before_post_game_upload(
     monkeypatch.setattr(
         service.drive_client,
         "build_drive",
-        lambda: build_calls.append(next(drive_sequence)) or build_calls[-1],
+        lambda status=None: build_calls.append(next(drive_sequence)) or build_calls[-1],
     )
     monkeypatch.setattr(
         service,
         "_download_if_needed",
-        lambda drive, profile, save_folder: download_calls.append(drive)
+        lambda drive, profile, save_folder, *, report: download_calls.append(drive)
         or ("initial-hash", "cloud-hash", {"stale": True}),
     )
     monkeypatch.setattr(service, "_launch_game", lambda profile: None)
@@ -160,7 +160,7 @@ def test_run_profile_rebuilds_drive_before_post_game_upload(
     monkeypatch.setattr(
         service,
         "_upload_if_needed",
-        lambda drive, profile, save_folder, meta_path, initial_hash, final_hash, cloud_hash, remote_file: upload_calls.append(
+        lambda drive, profile, save_folder, meta_path, initial_hash, final_hash, cloud_hash, remote_file, *, report: upload_calls.append(
             (drive, remote_file)
         ),
     )
@@ -192,12 +192,12 @@ def test_sync_profile_retries_transient_drive_error_once(
     monkeypatch.setattr(
         service.drive_client,
         "build_drive",
-        lambda: build_calls.append(next(drive_sequence)) or build_calls[-1],
+        lambda status=None: build_calls.append(next(drive_sequence)) or build_calls[-1],
     )
     monkeypatch.setattr(
         service,
         "_download_if_needed",
-        lambda drive, profile, save_folder: ("initial-hash", "cloud-hash", None),
+        lambda drive, profile, save_folder, *, report: ("initial-hash", "cloud-hash", None),
     )
     monkeypatch.setattr(sync_module, "snapshot_path", lambda path: "final-hash")
     monkeypatch.setattr(service, "_find_remote_file", lambda drive, profile: {"drive": drive})
@@ -211,6 +211,8 @@ def test_sync_profile_retries_transient_drive_error_once(
         final_hash,
         cloud_hash,
         remote_file,
+        *,
+        report,
     ) -> None:
         upload_calls.append(drive)
         if drive == "upload-drive-1":
@@ -222,8 +224,141 @@ def test_sync_profile_retries_transient_drive_error_once(
 
     assert build_calls == ["download-drive", "upload-drive-1", "upload-drive-2"]
     assert upload_calls == ["upload-drive-1", "upload-drive-2"]
-    assert status_updates[-1] == "Abgeschlossen"
-    assert "Verbindung wird erneuert" in status_updates
+    assert status_updates[-1] == "Synchronisierung abgeschlossen"
+    assert "Verbindung wurde unterbrochen, Drive-Verbindung wird erneut aufgebaut" in status_updates
+
+
+def test_run_profile_reports_detailed_status_sequence(monkeypatch, tmp_path: Path) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Steam Game",
+        game_exe_path="2646460",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    drive_sequence = iter(["download-drive", "upload-drive"])
+    status_updates: list[str] = []
+
+    def build_drive(status=None):
+        if status is not None:
+            status("Google-Authentifizierung wird vorbereitet")
+            status("Google-Authentifizierung abgeschlossen")
+        return next(drive_sequence)
+
+    monkeypatch.setattr(service.drive_client, "build_drive", build_drive)
+    monkeypatch.setattr(
+        service,
+        "_download_if_needed",
+        lambda drive, profile, save_folder, *, report: (
+            report("Drive-Archiv wird gesucht"),
+            report("Kein Drive-Download nötig"),
+            ("initial-hash", "cloud-hash", None),
+        )[-1],
+    )
+    monkeypatch.setattr(service, "_launch_game", lambda profile: None)
+    monkeypatch.setattr(
+        service, "_wait_for_game", lambda profile, process, report: report("Spiel läuft")
+    )
+    monkeypatch.setattr(sync_module, "snapshot_path", lambda path: "final-hash")
+    monkeypatch.setattr(service, "_find_remote_file", lambda drive, profile: None)
+    monkeypatch.setattr(
+        service,
+        "_upload_if_needed",
+        lambda drive, profile, save_folder, meta_path, initial_hash, final_hash, cloud_hash, remote_file, *, report: (
+            report("Drive-Ziel wird geprüft"),
+            report("Kein Drive-Upload nötig"),
+            None,
+        )[-1],
+    )
+
+    service.run_profile(profile, status_updates.append)
+
+    assert status_updates == [
+        "Drive-Download wird vorbereitet",
+        "Google-Authentifizierung wird vorbereitet",
+        "Google-Authentifizierung abgeschlossen",
+        "Drive-Archiv wird gesucht",
+        "Kein Drive-Download nötig",
+        "Spiel wird gestartet",
+        "Spiel läuft",
+        "Drive-Upload wird vorbereitet",
+        "Google-Authentifizierung wird vorbereitet",
+        "Google-Authentifizierung abgeschlossen",
+        "Drive-Ziel wird geprüft",
+        "Kein Drive-Upload nötig",
+        "Synchronisierung abgeschlossen",
+    ]
+
+
+def test_recover_profile_from_backup_reports_detailed_status_sequence(
+    monkeypatch, tmp_path: Path
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="save",
+    )
+    save_folder = Path(profile.save_folder_path)
+    backup_folder = save_folder.parent / "save_backup_1720000000"
+    backup_folder.mkdir(parents=True, exist_ok=True)
+    write_directory_files(backup_folder, {"slot1.sav": b"backup-content"})
+    service._write_backup_marker(
+        backup_folder,
+        profile_id=profile.id,
+        save_folder_name="save",
+        timestamp=1_720_000_000,
+    )
+    status_updates: list[str] = []
+
+    def build_drive(status=None):
+        if status is not None:
+            status("Google-Authentifizierung wird vorbereitet")
+            status("Google-Authentifizierung abgeschlossen")
+        return "drive"
+
+    monkeypatch.setattr(service.drive_client, "build_drive", build_drive)
+    monkeypatch.setattr(
+        service,
+        "_find_remote_file",
+        lambda drive, profile: {"id": "remote-file"},
+    )
+    monkeypatch.setattr(service, "_create_remote_recovery_copy", lambda remote_file, profile: None)
+    monkeypatch.setattr(sync_module, "snapshot_path", lambda path: "final-hash")
+    monkeypatch.setattr(
+        service,
+        "_upload_recovered_profile",
+        lambda drive, profile, save_folder, remote_file, *, report: (
+            report("Drive-Ziel wird geprüft"),
+            report("Save-Daten werden archiviert"),
+            report("Archiv wird zu Google Drive hochgeladen"),
+            None,
+        )[-1],
+    )
+
+    service.recover_profile_from_backup(profile, backup_folder, status_updates.append)
+
+    assert status_updates == [
+        "Drive-Archiv wird gesucht",
+        "Google-Authentifizierung wird vorbereitet",
+        "Google-Authentifizierung abgeschlossen",
+        "Drive-Archiv gefunden",
+        "Drive-Sicherheitskopie wird erstellt",
+        "Google-Authentifizierung wird vorbereitet",
+        "Google-Authentifizierung abgeschlossen",
+        "Lokales Backup wird wiederhergestellt",
+        "Wiederhergestellter Stand wird hochgeladen",
+        "Drive-Upload wird vorbereitet",
+        "Google-Authentifizierung wird vorbereitet",
+        "Google-Authentifizierung abgeschlossen",
+        "Drive-Ziel wird geprüft",
+        "Save-Daten werden archiviert",
+        "Archiv wird zu Google Drive hochgeladen",
+        "Synchronisierung abgeschlossen",
+    ]
 
 
 def test_sync_profile_does_not_retry_non_transient_drive_error(
@@ -243,12 +378,12 @@ def test_sync_profile_does_not_retry_non_transient_drive_error(
     monkeypatch.setattr(
         service.drive_client,
         "build_drive",
-        lambda: build_calls.append(f"drive-{len(build_calls) + 1}") or build_calls[-1],
+        lambda status=None: build_calls.append(f"drive-{len(build_calls) + 1}") or build_calls[-1],
     )
     monkeypatch.setattr(
         service,
         "_download_if_needed",
-        lambda drive, profile, save_folder: ("initial-hash", "cloud-hash", None),
+        lambda drive, profile, save_folder, *, report: ("initial-hash", "cloud-hash", None),
     )
     monkeypatch.setattr(sync_module, "snapshot_path", lambda path: "final-hash")
     monkeypatch.setattr(service, "_find_remote_file", lambda drive, profile: {"drive": drive})
@@ -262,6 +397,8 @@ def test_sync_profile_does_not_retry_non_transient_drive_error(
         final_hash,
         cloud_hash,
         remote_file,
+        *,
+        report,
     ) -> None:
         upload_calls.append(drive)
         raise RuntimeError("permanent failure")
@@ -676,7 +813,9 @@ def test_download_if_needed_skips_replace_when_remote_matches_local(
         lambda target, source: replacements.append((target, source)),
     )
 
-    local_hash, cloud_hash, remote_file = service._download_if_needed(drive, profile, save_folder)
+    local_hash, cloud_hash, remote_file = service._download_if_needed(
+        drive, profile, save_folder, report=lambda _: None
+    )
 
     assert local_hash == expected_hash
     assert cloud_hash == expected_hash
@@ -723,7 +862,9 @@ def test_download_if_needed_backs_up_and_replaces_changed_remote_once(
     monkeypatch.setattr(sync_module, "snapshot_path", track_snapshot)
     monkeypatch.setattr(service, "_latest_tree_mtime", lambda path: 1_000_000_000.0)
 
-    local_hash, cloud_hash, remote_file = service._download_if_needed(drive, profile, save_folder)
+    local_hash, cloud_hash, remote_file = service._download_if_needed(
+        drive, profile, save_folder, report=lambda _: None
+    )
 
     assert remote_file is drive.remote_file
     assert drive.remote_file.download_calls == 1
@@ -769,7 +910,9 @@ def test_download_if_needed_keeps_local_save_when_it_is_newer_than_remote(
         lambda target, source: replacements.append((target, source)),
     )
 
-    local_hash, cloud_hash, remote_file = service._download_if_needed(drive, profile, save_folder)
+    local_hash, cloud_hash, remote_file = service._download_if_needed(
+        drive, profile, save_folder, report=lambda _: None
+    )
 
     assert remote_file is drive.remote_file
     assert cloud_hash == expected_cloud_hash
@@ -811,8 +954,12 @@ def test_recover_profile_from_backup_restores_local_save_and_uploads_to_existing
     drive = RecoveryDrive(remote_file)
     uploaded: list[DummyDriveFile] = []
 
-    monkeypatch.setattr(service.drive_client, "build_drive", lambda: drive)
-    monkeypatch.setattr(service, "_upload_directory", lambda drive_file, folder: uploaded.append(drive_file))
+    monkeypatch.setattr(service.drive_client, "build_drive", lambda status=None: drive)
+    monkeypatch.setattr(
+        service,
+        "_upload_directory",
+        lambda drive_file, folder, *, report=None: uploaded.append(drive_file),
+    )
 
     service.recover_profile_from_backup(profile, backup_folder)
 
@@ -850,11 +997,11 @@ def test_recover_profile_from_backup_creates_remote_archive_when_missing(
     drive = RecoveryDrive(None)
     uploaded: list[tuple[DummyDriveFile, Path]] = []
 
-    monkeypatch.setattr(service.drive_client, "build_drive", lambda: drive)
+    monkeypatch.setattr(service.drive_client, "build_drive", lambda status=None: drive)
     monkeypatch.setattr(
         service,
         "_upload_directory",
-        lambda drive_file, folder: uploaded.append((drive_file, folder)),
+        lambda drive_file, folder, *, report=None: uploaded.append((drive_file, folder)),
     )
 
     service.recover_profile_from_backup(profile, backup_folder)
@@ -898,7 +1045,9 @@ def test_upload_if_needed_uploads_unchanged_local_save_when_cloud_is_older(tmp_p
     existing_file = DummyDriveFile(title="save.zip")
     uploaded: list[DummyDriveFile] = []
 
-    service._upload_directory = lambda drive_file, folder: uploaded.append(drive_file)
+    service._upload_directory = (
+        lambda drive_file, folder, *, report=None: uploaded.append(drive_file)
+    )
 
     final_hash = snapshot_path(save_folder)
     service._upload_if_needed(
@@ -910,6 +1059,7 @@ def test_upload_if_needed_uploads_unchanged_local_save_when_cloud_is_older(tmp_p
         final_hash=final_hash,
         cloud_hash="older-cloud-hash",
         remote_file=existing_file,
+        report=lambda _: None,
     )
 
     assert uploaded == [existing_file]
@@ -932,7 +1082,9 @@ def test_upload_if_needed_creates_initial_remote_archive_without_local_changes(t
     drive = DummyDrive()
     uploaded: list[tuple[DummyDriveFile, Path]] = []
 
-    service._upload_directory = lambda drive_file, folder: uploaded.append((drive_file, folder))
+    service._upload_directory = (
+        lambda drive_file, folder, *, report=None: uploaded.append((drive_file, folder))
+    )
 
     final_hash = snapshot_path(save_folder)
     service._upload_if_needed(
@@ -944,6 +1096,7 @@ def test_upload_if_needed_creates_initial_remote_archive_without_local_changes(t
         final_hash=final_hash,
         cloud_hash=None,
         remote_file=None,
+        report=lambda _: None,
     )
 
     assert drive.created_metadata == {
@@ -971,7 +1124,9 @@ def test_upload_if_needed_updates_existing_remote_file_metadata(tmp_path: Path) 
     existing_file = DummyDriveFile(title="old-name.zip", parents=[{"id": "old-folder"}])
     uploaded: list[DummyDriveFile] = []
 
-    service._upload_directory = lambda drive_file, folder: uploaded.append(drive_file)
+    service._upload_directory = (
+        lambda drive_file, folder, *, report=None: uploaded.append(drive_file)
+    )
 
     service._upload_if_needed(
         drive=None,
@@ -982,6 +1137,7 @@ def test_upload_if_needed_updates_existing_remote_file_metadata(tmp_path: Path) 
         final_hash=snapshot_path(save_folder),
         cloud_hash="outdated",
         remote_file=existing_file,
+        report=lambda _: None,
     )
 
     assert existing_file["title"] == "fresh-name.zip"
@@ -1033,4 +1189,3 @@ def test_upload_directory_propagates_upload_errors(tmp_path: Path) -> None:
         service._upload_directory(drive_file, save_folder)
 
     assert drive_file.content is None
-

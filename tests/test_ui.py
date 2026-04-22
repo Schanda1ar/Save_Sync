@@ -602,7 +602,8 @@ def test_controller_start_selected_game_runs_service(monkeypatch, tmp_path: Path
 
         def run_profile(self, profile, status) -> None:
             calls.append(profile.id)
-            status("Abgeschlossen")
+            status("Drive-Download wird vorbereitet")
+            status("Synchronisierung abgeschlossen")
 
         def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
             raise AssertionError("recover_profile_from_backup should not be used for start flow")
@@ -615,7 +616,7 @@ def test_controller_start_selected_game_runs_service(monkeypatch, tmp_path: Path
     controller.startSelectedGame()
 
     assert calls == ["profile-1"]
-    assert controller.statusMessage == "Abgeschlossen"
+    assert controller.statusMessage == "Synchronisierung abgeschlossen"
     assert controller.busy is False
 
 
@@ -693,7 +694,7 @@ def test_controller_manual_sync_runs_service(monkeypatch, tmp_path: Path) -> Non
 
         def sync_profile(self, profile, status) -> None:
             calls.append(profile.id)
-            status("Abgeschlossen")
+            status("Synchronisierung abgeschlossen")
 
         def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
             raise AssertionError("recover_profile_from_backup should not be used for manual sync")
@@ -706,7 +707,7 @@ def test_controller_manual_sync_runs_service(monkeypatch, tmp_path: Path) -> Non
     controller.syncSelectedProfile()
 
     assert calls == ["profile-1"]
-    assert controller.statusMessage == "Abgeschlossen"
+    assert controller.statusMessage == "Synchronisierung abgeschlossen"
     assert controller.busy is False
 
 
@@ -746,7 +747,7 @@ def test_controller_manual_sync_refreshes_recovery_backups_after_new_backup(
 
         def sync_profile(self, profile, status) -> None:
             state["created"] = True
-            status("Abgeschlossen")
+            status("Synchronisierung abgeschlossen")
 
         def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
             raise AssertionError("recover_profile_from_backup should not be used for manual sync")
@@ -796,7 +797,7 @@ def test_controller_start_selected_game_refreshes_recovery_backups_after_new_bac
 
         def run_profile(self, profile, status) -> None:
             state["created"] = True
-            status("Abgeschlossen")
+            status("Synchronisierung abgeschlossen")
 
         def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
             raise AssertionError("recover_profile_from_backup should not be used for start flow")
@@ -882,7 +883,7 @@ def test_controller_manual_recovery_runs_recovery_service(
 
         def recover_profile_from_backup(self, profile, selected_backup, status) -> None:
             calls.append((profile.id, selected_backup))
-            status("Abgeschlossen")
+            status("Synchronisierung abgeschlossen")
 
     monkeypatch.setattr(ui_module, "ConfigStore", lambda *args, **kwargs: store)
     monkeypatch.setattr(ui_module, "SaveSyncService", RecordingSyncService)
@@ -895,5 +896,5 @@ def test_controller_manual_recovery_runs_recovery_service(
         {"label": backup_path.name, "path": str(backup_path)}
     ]
     assert calls == [("profile-1", str(backup_path))]
-    assert controller.statusMessage == "Abgeschlossen"
+    assert controller.statusMessage == "Synchronisierung abgeschlossen"
     assert controller.busy is False

@@ -107,18 +107,16 @@ class SaveSyncService:
         report = status or (lambda _: None)
         save_folder, meta_path = self._prepare_profile(profile, require_launch_target=True)
 
-        report("Download läuft")
         initial_hash, cloud_hash, _ = self._run_drive_operation(
-            lambda drive: self._download_if_needed(drive, profile, save_folder),
+            lambda drive: self._download_if_needed(drive, profile, save_folder, report=report),
             report=report,
-            retry_status="Verbindung wird erneuert",
+            prepare_status="Drive-Download wird vorbereitet",
         )
 
-        report("Spielstart")
+        report("Spiel wird gestartet")
         process = self._launch_game(profile)
         self._wait_for_game(profile, process, report)
 
-        report("Upload läuft")
         final_hash = snapshot_path(save_folder)
         self._run_drive_operation(
             lambda drive: self._upload_if_needed(
@@ -130,25 +128,24 @@ class SaveSyncService:
                 final_hash,
                 cloud_hash,
                 self._find_remote_file(drive, profile),
+                report=report,
             ),
             report=report,
-            retry_status="Verbindung wird erneuert",
+            prepare_status="Drive-Upload wird vorbereitet",
         )
-        report("Abgeschlossen")
+        report("Synchronisierung abgeschlossen")
 
     def sync_profile(self, profile: GameProfile, status: StatusCallback | None = None) -> None:
         """Sync a profile without launching the game."""
         report = status or (lambda _: None)
         save_folder, meta_path = self._prepare_profile(profile, require_launch_target=False)
 
-        report("Download läuft")
         initial_hash, cloud_hash, _ = self._run_drive_operation(
-            lambda drive: self._download_if_needed(drive, profile, save_folder),
+            lambda drive: self._download_if_needed(drive, profile, save_folder, report=report),
             report=report,
-            retry_status="Verbindung wird erneuert",
+            prepare_status="Drive-Download wird vorbereitet",
         )
 
-        report("Upload läuft")
         final_hash = snapshot_path(save_folder)
         self._run_drive_operation(
             lambda drive: self._upload_if_needed(
@@ -160,11 +157,12 @@ class SaveSyncService:
                 final_hash,
                 cloud_hash,
                 self._find_remote_file(drive, profile),
+                report=report,
             ),
             report=report,
-            retry_status="Verbindung wird erneuert",
+            prepare_status="Drive-Upload wird vorbereitet",
         )
-        report("Abgeschlossen")
+        report("Synchronisierung abgeschlossen")
 
     def list_recovery_backups(self, profile: GameProfile) -> list[Path]:
         """Return discovered timestamped local backups for the selected profile."""
@@ -182,40 +180,38 @@ class SaveSyncService:
         save_folder, meta_path = self._prepare_profile(profile, require_launch_target=False)
         backup_folder = self._validate_recovery_backup(save_folder, Path(backup_path), profile.id)
 
-        report("Drive-Archiv wird gesucht")
         remote_file = self._run_drive_operation(
-            lambda drive: self._find_remote_file(drive, profile),
+            lambda drive: self._find_remote_file_for_recovery(drive, profile, report=report),
             report=report,
-            retry_status="Verbindung wird erneuert",
+            prepare_status="Drive-Archiv wird gesucht",
         )
         if remote_file is not None:
-            report("Drive-Sicherheitskopie wird erstellt")
             self._run_drive_operation(
                 lambda drive: self._create_remote_recovery_copy(
                     self._find_remote_file(drive, profile) or remote_file,
                     profile,
                 ),
                 report=report,
-                retry_status="Verbindung wird erneuert",
+                prepare_status="Drive-Sicherheitskopie wird erstellt",
             )
 
-        report("Backup wird wiederhergestellt")
+        report("Lokales Backup wird wiederhergestellt")
         # Recovery intentionally restores the selected backup directly into the live save folder.
         self._replace_directory(save_folder, backup_folder)
 
-        report("Upload läuft")
+        report("Wiederhergestellter Stand wird hochgeladen")
         final_hash = snapshot_path(save_folder)
         if final_hash is None:
             raise SyncError(f"Save-Ordner nicht gefunden: {save_folder}")
         self._run_drive_operation(
             lambda drive: self._upload_recovered_profile(
-                drive, profile, save_folder, remote_file
+                drive, profile, save_folder, remote_file, report=report
             ),
             report=report,
-            retry_status="Verbindung wird erneuert",
+            prepare_status="Drive-Upload wird vorbereitet",
         )
         save_meta({"hash": final_hash, "kind": "directory"}, meta_path)
-        report("Abgeschlossen")
+        report("Synchronisierung abgeschlossen")
 
     def _meta_path(self, save_folder: Path) -> Path:
         """Store sync metadata next to the configured save directory."""
@@ -249,21 +245,50 @@ class SaveSyncService:
         file_list = drive.ListFile({"q": self._query(profile)}).GetList()
         return file_list[0] if file_list else None
 
-    def _download_if_needed(self, drive, profile: GameProfile, save_folder: Path):
+    def _find_remote_file_for_recovery(
+        self, drive, profile: GameProfile, *, report: StatusCallback
+    ):
+        """Look up the current Drive archive and report whether one exists."""
+        remote_file = self._find_remote_file(drive, profile)
+        if remote_file is None:
+            report("Kein Drive-Archiv gefunden")
+        else:
+            report("Drive-Archiv gefunden")
+        return remote_file
+
+    def _download_if_needed(
+        self,
+        drive,
+        profile: GameProfile,
+        save_folder: Path,
+        *,
+        report: StatusCallback,
+    ):
         """Download and unpack the remote archive so its contents can be compared locally."""
+        report("Drive-Archiv wird gesucht")
         remote_file = self._find_remote_file(drive, profile)
         local_hash = snapshot_path(save_folder)
         cloud_hash = None
 
-        if remote_file is not None:
-            with self._downloaded_remote_directory(remote_file) as (cloud_hash, extracted_path):
-                if cloud_hash != local_hash and self._should_replace_local_save(
-                    save_folder, remote_file
-                ):
-                    # Keep a timestamped backup before the cloud version replaces local saves.
-                    self._backup_existing(profile, save_folder)
-                    self._replace_directory(save_folder, extracted_path)
-                    local_hash = cloud_hash
+        if remote_file is None:
+            report("Kein Drive-Download nötig")
+            return local_hash, cloud_hash, remote_file
+
+        report("Drive-Archiv wird heruntergeladen")
+        with self._downloaded_remote_directory(remote_file, report=report) as (cloud_hash, extracted_path):
+            if cloud_hash == local_hash:
+                report("Kein Drive-Download nötig")
+                return local_hash, cloud_hash, remote_file
+
+            if not self._should_replace_local_save(save_folder, remote_file):
+                report("Kein Drive-Download nötig")
+                return local_hash, cloud_hash, remote_file
+
+            # Keep a timestamped backup before the cloud version replaces local saves.
+            report("Lokaler Spielstand wird aus Drive übernommen")
+            self._backup_existing(profile, save_folder)
+            self._replace_directory(save_folder, extracted_path)
+            local_hash = cloud_hash
 
         return local_hash, cloud_hash, remote_file
 
@@ -277,17 +302,22 @@ class SaveSyncService:
         final_hash: str | None,
         cloud_hash: str | None,
         remote_file,
+        *,
+        report: StatusCallback,
     ) -> None:
         """Upload the save folder unless nothing changed locally or in the cloud."""
+        report("Drive-Ziel wird geprüft")
         if final_hash is None:
             raise SyncError(f"Save-Ordner nicht gefunden: {save_folder}")
         if cloud_hash and final_hash == cloud_hash:
+            report("Kein Drive-Upload nötig")
             return
         if remote_file is not None and final_hash == initial_hash == cloud_hash:
+            report("Kein Drive-Upload nötig")
             return
 
         drive_file = self._prepare_drive_file(drive, profile, remote_file)
-        self._upload_directory(drive_file, save_folder)
+        self._upload_directory(drive_file, save_folder, report=report)
         save_meta({"hash": final_hash, "kind": "directory"}, meta_path)
 
     def _upload_metadata(self, profile: GameProfile) -> dict[str, object]:
@@ -307,18 +337,18 @@ class SaveSyncService:
             remote_file[key] = value
         return remote_file
 
-    def _run_drive_operation(self, operation, *, report: StatusCallback, retry_status: str):
+    def _run_drive_operation(self, operation, *, report: StatusCallback, prepare_status: str):
         """Run one Drive operation with a fresh client and retry one transient disconnect."""
-        report("Authentifizierung läuft")
-        drive = self.drive_client.build_drive()
+        report(prepare_status)
+        drive = self.drive_client.build_drive(status=report)
         try:
             return operation(drive)
         except Exception as exc:
             if not self._is_transient_drive_error(exc):
                 raise
-        report(retry_status)
-        report("Authentifizierung läuft")
-        drive = self.drive_client.build_drive()
+        report("Verbindung wurde unterbrochen, Drive-Verbindung wird erneut aufgebaut")
+        report(prepare_status)
+        drive = self.drive_client.build_drive(status=report)
         return operation(drive)
 
     def _is_transient_drive_error(self, exc: Exception) -> bool:
@@ -353,11 +383,14 @@ class SaveSyncService:
         profile: GameProfile,
         save_folder: Path,
         remote_file,
+        *,
+        report: StatusCallback,
     ) -> None:
         """Upload a restored save folder using a current Drive file handle."""
+        report("Drive-Ziel wird geprüft")
         refreshed_remote_file = self._find_remote_file(drive, profile)
         drive_file = self._prepare_drive_file(drive, profile, refreshed_remote_file or remote_file)
-        self._upload_directory(drive_file, save_folder)
+        self._upload_directory(drive_file, save_folder, report=report)
 
     def _wait_for_game(
         self,
@@ -430,7 +463,9 @@ class SaveSyncService:
         return False
 
     @contextmanager
-    def _downloaded_remote_directory(self, remote_file) -> Iterator[tuple[str, Path]]:
+    def _downloaded_remote_directory(
+        self, remote_file, *, report: StatusCallback
+    ) -> Iterator[tuple[str, Path]]:
         """Yield the extracted cloud archive together with its directory digest."""
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
@@ -438,6 +473,7 @@ class SaveSyncService:
             extracted_path = temp_dir / "extracted"
             remote_file.GetContentFile(str(archive_path))
             extracted_path.mkdir(parents=True, exist_ok=True)
+            report("Drive-Archiv wird entpackt")
             with zipfile.ZipFile(archive_path, "r") as archive:
                 archive.extractall(extracted_path)
             yield manifest_digest(build_directory_manifest(extracted_path)), extracted_path
@@ -577,16 +613,21 @@ class SaveSyncService:
         timestamp = datetime.now().strftime(RECOVERY_COPY_TIMESTAMP_FORMAT)
         return f"{Path(drive_filename).stem}_pre_recovery_{timestamp}.zip"
 
-    def _upload_directory(self, drive_file, save_folder: Path) -> None:
+    def _upload_directory(
+        self, drive_file, save_folder: Path, *, report: StatusCallback | None = None
+    ) -> None:
         """Archive a save directory as ZIP and upload it to the configured Drive file."""
+        notify = report or (lambda _: None)
         with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as temp_file:
             archive_path = Path(temp_file.name)
         try:
+            notify("Save-Daten werden archiviert")
             with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for file_path in sorted(item for item in save_folder.rglob("*") if item.is_file()):
                     archive.write(file_path, arcname=file_path.relative_to(save_folder).as_posix())
             drive_file["description"] = "savesync:directory"
             drive_file.SetContentFile(str(archive_path))
+            notify("Archiv wird zu Google Drive hochgeladen")
             drive_file.Upload()
         finally:
             self._release_drive_file_content(drive_file)
