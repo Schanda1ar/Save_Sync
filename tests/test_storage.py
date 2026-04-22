@@ -6,17 +6,18 @@ from backend.storage import ConfigStore
 
 
 def test_load_returns_empty_config_when_json_missing(tmp_path: Path) -> None:
-    store = ConfigStore(config_path=tmp_path / "profiles.json", base_dir=tmp_path)
+    store = ConfigStore(config_path=tmp_path / "profiles.json")
 
     config = store.load()
 
     assert config == AppConfig()
     assert config.profiles == []
     assert config.selected_profile_id == ""
+    assert not (tmp_path / "profiles.json").exists()
 
 
 def test_save_writes_json_config(tmp_path: Path) -> None:
-    store = ConfigStore(config_path=tmp_path / "profiles.json", base_dir=tmp_path)
+    store = ConfigStore(config_path=tmp_path / "profiles.json")
     profile = GameProfile.create(
         profile_id="profile-1",
         display_name="Example Game",

@@ -10,17 +10,15 @@ from .models import AppConfig
 class ConfigStore:
     """Load and persist the application's JSON configuration."""
 
-    def __init__(self, *, config_path: Path | None = None, base_dir: Path | None = None) -> None:
+    def __init__(self, *, config_path: Path | None = None) -> None:
         self.config_path = config_path or app_config_path()
 
     def load(self) -> AppConfig:
-        """Load JSON config or initialize an empty config on first run."""
+        """Load JSON config or return an empty config on first run."""
         if self.config_path.exists():
             payload = json.loads(self.config_path.read_text(encoding="utf-8"))
             return AppConfig.from_dict(payload)
-        config = AppConfig()
-        self.save(config)
-        return config
+        return AppConfig()
 
     def save(self, config: AppConfig) -> None:
         """Validate and write the configuration to disk."""

@@ -72,6 +72,25 @@ ApplicationWindow {
         return backups[recoveryBackupCombo.currentIndex].path || ""
     }
 
+    function hasUnsavedChanges() {
+        return controller.hasUnsavedProfileChanges(
+            nameField.text,
+            exeField.text,
+            saveField.text,
+            processField.text,
+            driveFileField.text,
+            driveFolderField.text
+        )
+    }
+
+    function runWhenProfileSaved(action) {
+        if (window.hasUnsavedChanges()) {
+            unsavedChangesDialog.open()
+            return
+        }
+        action()
+    }
+
     Component.onCompleted: {
         reloadForm()
         syncComboSelection()
@@ -618,20 +637,9 @@ ApplicationWindow {
                             text: controller.busy ? "Läuft..." : "Sync"
                             enabled: !controller.busy
                             implicitHeight: 34
-                            onClicked: {
-                                if (controller.hasUnsavedProfileChanges(
-                                        nameField.text,
-                                        exeField.text,
-                                        saveField.text,
-                                        processField.text,
-                                        driveFileField.text,
-                                        driveFolderField.text
-                                    )) {
-                                    unsavedChangesDialog.open()
-                                    return
-                                }
+                            onClicked: window.runWhenProfileSaved(function() {
                                 controller.syncSelectedProfile()
-                            }
+                            })
                             background: Rectangle {
                                 radius: 10
                                 color: syncButton.hovered ? buttonHoverBg : buttonBg
@@ -656,20 +664,9 @@ ApplicationWindow {
                             text: controller.busy ? "Läuft..." : "Backup"
                             enabled: !controller.busy && controller.recoveryBackups.length > 0
                             implicitHeight: 34
-                            onClicked: {
-                                if (controller.hasUnsavedProfileChanges(
-                                        nameField.text,
-                                        exeField.text,
-                                        saveField.text,
-                                        processField.text,
-                                        driveFileField.text,
-                                        driveFolderField.text
-                                    )) {
-                                    unsavedChangesDialog.open()
-                                    return
-                                }
+                            onClicked: window.runWhenProfileSaved(function() {
                                 recoveryConfirmDialog.open()
-                            }
+                            })
                             background: Rectangle {
                                 radius: 10
                                 color: recoveryButton.hovered ? buttonHoverBg : buttonBg
@@ -694,20 +691,9 @@ ApplicationWindow {
                             text: controller.busy ? "Läuft..." : "Spielstart"
                             enabled: !controller.busy
                             implicitHeight: 34
-                            onClicked: {
-                                if (controller.hasUnsavedProfileChanges(
-                                        nameField.text,
-                                        exeField.text,
-                                        saveField.text,
-                                        processField.text,
-                                        driveFileField.text,
-                                        driveFolderField.text
-                                    )) {
-                                    unsavedChangesDialog.open()
-                                    return
-                                }
+                            onClicked: window.runWhenProfileSaved(function() {
                                 controller.startSelectedGame()
-                            }
+                            })
                             background: Rectangle {
                                 radius: 10
                                 color: startButton.hovered ? buttonHoverBg : buttonBg

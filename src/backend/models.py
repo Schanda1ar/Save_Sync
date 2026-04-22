@@ -44,7 +44,7 @@ def normalize_process_names(value: Any) -> list[str]:
 
 
 def normalize_save_folder_path(value: Any) -> str:
-    """Normalize save locations to a directory path."""
+    """Normalize save locations while preserving non-existing directory names."""
     path_text = _clean_string(value, "save_folder_path")
     path = Path(path_text)
 
@@ -55,8 +55,6 @@ def normalize_save_folder_path(value: Any) -> str:
             return str(path.parent)
         raise ValidationError("'save_folder_path' muss auf einen Ordner zeigen.")
 
-    if path.suffix:
-        return str(path.parent)
     return str(path)
 
 
@@ -111,14 +109,6 @@ def is_steam_game_id(value: str) -> bool:
     return value.isdigit()
 
 
-def normalize_launch_target(value: Any) -> str:
-    """Normalize a launch target while preserving Steam game ids verbatim."""
-    text = _clean_string(value, "game_exe_path")
-    if is_steam_game_id(text):
-        return text
-    return text
-
-
 @dataclass(slots=True)
 class GameProfile:
     """Validated application profile for one game's sync configuration."""
@@ -164,7 +154,7 @@ class GameProfile:
         profile = cls(
             id=_clean_string(payload.get("id"), "id"),
             display_name=_clean_string(payload.get("display_name"), "display_name"),
-            game_exe_path=normalize_launch_target(payload.get("game_exe_path")),
+            game_exe_path=_clean_string(payload.get("game_exe_path"), "game_exe_path"),
             save_folder_path=normalize_save_folder_path(payload.get("save_folder_path")),
             game_process_names=normalize_process_names(payload.get("game_process_names")),
             drive_filename=normalize_drive_filename(payload.get("drive_filename")),
@@ -203,7 +193,6 @@ class AppConfig:
 
     profiles: list[GameProfile] = field(default_factory=list)
     selected_profile_id: str = ""
-    theme_mode: str = "dark"
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "AppConfig":
@@ -216,7 +205,6 @@ class AppConfig:
         config = cls(
             profiles=profiles,
             selected_profile_id=str(payload.get("selected_profile_id", "")).strip(),
-            theme_mode=str(payload.get("theme_mode", "dark")).strip() or "dark",
         )
         config.validate()
         return config

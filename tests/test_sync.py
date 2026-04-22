@@ -1145,6 +1145,46 @@ def test_upload_if_needed_updates_existing_remote_file_metadata(tmp_path: Path) 
     assert uploaded == [existing_file]
 
 
+def test_upload_if_needed_clears_existing_remote_parents_when_folder_id_is_removed(
+    tmp_path: Path,
+) -> None:
+    service = SaveSyncService(base_dir=tmp_path)
+    profile = GameProfile.create(
+        display_name="Example Game",
+        game_exe_path="C:/Games/Game.exe",
+        save_folder_path=str(tmp_path / "save"),
+        game_process_names=["Game.exe"],
+        drive_filename="fresh-name",
+        drive_folder_id="",
+    )
+    save_folder = Path(profile.save_folder_path)
+    save_folder.mkdir()
+    (save_folder / "slot1.sav").write_text("changed-content", encoding="utf-8")
+    meta_path = tmp_path / "save.meta.json"
+    existing_file = DummyDriveFile(title="old-name.zip", parents=[{"id": "old-folder"}])
+    uploaded: list[DummyDriveFile] = []
+
+    service._upload_directory = (
+        lambda drive_file, folder, *, report=None: uploaded.append(drive_file)
+    )
+
+    service._upload_if_needed(
+        drive=None,
+        profile=profile,
+        save_folder=save_folder,
+        meta_path=meta_path,
+        initial_hash="initial",
+        final_hash=snapshot_path(save_folder),
+        cloud_hash="outdated",
+        remote_file=existing_file,
+        report=lambda _: None,
+    )
+
+    assert existing_file["title"] == "fresh-name.zip"
+    assert existing_file["parents"] == []
+    assert uploaded == [existing_file]
+
+
 def test_upload_directory_closes_drive_content_and_removes_temp_archive(tmp_path: Path) -> None:
     service = SaveSyncService(base_dir=tmp_path)
     save_folder = tmp_path / "save"

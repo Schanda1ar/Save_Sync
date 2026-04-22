@@ -2,17 +2,20 @@
 
 import threading
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 
-from .exchange import ImportProfilesResult, export_profiles, import_profiles
+from .exchange import (
+    ImportProfilesResult,
+    export_profiles,
+    import_profiles,
+    prepare_imported_save_folders,
+)
 from .models import (
     AppConfig,
     GameProfile,
     ValidationError,
     normalize_drive_filename,
-    normalize_launch_target,
     normalize_process_names,
     normalize_save_folder_path,
 )
@@ -35,7 +38,7 @@ class AppController(QObject):
 
     def __init__(self, base_dir: Path) -> None:
         super().__init__()
-        self._store = ConfigStore(base_dir=base_dir)
+        self._store = ConfigStore()
         self._sync_service = SaveSyncService(base_dir=base_dir)
         self._status_message = "Bereit"
         self._busy = False
@@ -110,12 +113,12 @@ class AppController(QObject):
             self._config.selected_profile_id = ""
         else:
             self._config.selected_profile_id = self._config.profiles[index].id
-        self._persist_selection()
+        self._persist(profile_list_changed=False)
 
     @Slot()
     def clearSelection(self) -> None:
         self._config.selected_profile_id = ""
-        self._persist_selection()
+        self._persist(profile_list_changed=False)
 
     @Slot(str, str, str, str, str, str, str)
     def saveProfile(
@@ -140,7 +143,7 @@ class AppController(QObject):
                 drive_folder_id=drive_folder_id,
             )
         except ValidationError as exc:
-            self._set_status(str(exc))
+            self._apply_status(str(exc))
             return
 
         existing = self._config.get_profile(profile.id)
@@ -152,59 +155,75 @@ class AppController(QObject):
 
         self._config.selected_profile_id = profile.id
         self._persist()
-        self._set_status(f"Profil '{profile.display_name}' gespeichert.")
+        self._apply_status(f"Profil '{profile.display_name}' gespeichert.")
 
     @Slot()
     def deleteSelectedProfile(self) -> None:
         profile = self._config.get_profile(self._config.selected_profile_id)
         if profile is None:
-            self._set_status("Kein Profil ausgewählt.")
+            self._apply_status("Kein Profil ausgewählt.")
             return
 
         self._config.profiles = [item for item in self._config.profiles if item.id != profile.id]
         self._config.selected_profile_id = self._config.profiles[0].id if self._config.profiles else ""
         self._persist()
-        self._set_status(f"Profil '{profile.display_name}' gelöscht.")
+        self._apply_status(f"Profil '{profile.display_name}' gelöscht.")
 
     @Slot(str)
     def importProfiles(self, source_url: str) -> None:
         """Import profiles from JSON and report any local path adjustments."""
         path = self._file_url_to_path(source_url)
         if not path:
-            self._set_status("Kein Importpfad ausgewählt.")
+            self._apply_status("Kein Importpfad ausgewählt.")
             return
         existing_ids = {profile.id for profile in self._config.profiles}
         try:
-            import_result = import_profiles(Path(path), existing_profile_ids=existing_ids)
+            import_result = import_profiles(
+                Path(path),
+                existing_profile_ids=existing_ids,
+                apply_save_folder_side_effects=False,
+            )
         except (OSError, ValidationError) as exc:
-            self._set_status(f"Import fehlgeschlagen: {exc}")
+            self._apply_status(f"Import fehlgeschlagen: {exc}")
             return
 
         self._config.profiles.extend(import_result.profiles)
         if not self._config.selected_profile_id and self._config.profiles:
             self._config.selected_profile_id = self._config.profiles[0].id
         self._persist()
-        self._set_status(self._build_import_status(import_result))
+        created_directory_count, unresolved_path_count = prepare_imported_save_folders(
+            import_result.profiles
+        )
+        self._apply_status(
+            self._build_import_status(
+                ImportProfilesResult(
+                    profiles=import_result.profiles,
+                    rewritten_path_count=import_result.rewritten_path_count,
+                    created_directory_count=created_directory_count,
+                    unresolved_path_count=unresolved_path_count,
+                )
+            )
+        )
 
     @Slot(str)
     def exportProfiles(self, target_url: str) -> None:
         """Export all current profiles to the chosen JSON file."""
         path = self._file_url_to_path(target_url)
         if not path:
-            self._set_status("Kein Exportpfad ausgewählt.")
+            self._apply_status("Kein Exportpfad ausgewählt.")
             return
         try:
             export_profiles(self._config.profiles, Path(path))
         except OSError as exc:
-            self._set_status(f"Export fehlgeschlagen: {exc}")
+            self._apply_status(f"Export fehlgeschlagen: {exc}")
             return
-        self._set_status(f"Profile exportiert nach {path}.")
+        self._apply_status(f"Profile exportiert nach {path}.")
 
     @Slot()
     def duplicateSelectedProfile(self) -> None:
         profile = self._config.get_profile(self._config.selected_profile_id)
         if profile is None:
-            self._set_status("Kein Profil ausgewählt.")
+            self._apply_status("Kein Profil ausgewählt.")
             return
 
         copy_profile = GameProfile.create(
@@ -218,7 +237,7 @@ class AppController(QObject):
         self._config.profiles.append(copy_profile)
         self._config.selected_profile_id = copy_profile.id
         self._persist()
-        self._set_status(
+        self._apply_status(
             f"Profil '{profile.display_name}' als '{copy_profile.display_name}' kopiert."
         )
 
@@ -244,7 +263,7 @@ class AppController(QObject):
     def recoverSelectedProfileFromBackup(self, backup_path: str) -> None:
         """Restore a selected local backup and upload it as the new manual truth."""
         if not backup_path.strip():
-            self._set_status("Kein Backup ausgewählt.")
+            self._apply_status("Kein Backup ausgewählt.")
             return
         self._run_selected_profile_action(
             action=lambda profile, status: self._sync_service.recover_profile_from_backup(
@@ -263,20 +282,22 @@ class AppController(QObject):
     ) -> None:
         profile = self._config.get_profile(self._config.selected_profile_id)
         if profile is None:
-            self._set_status(missing_selection_message)
+            self._apply_status(missing_selection_message)
             return
         if self._busy:
-            self._set_status(busy_message)
+            self._apply_status(busy_message)
             return
 
-        self._set_busy(True)
+        self._apply_busy(True)
 
         def worker() -> None:
             # The sync workflow can block on I/O and process waits, so it must stay off the UI thread.
             try:
                 action(profile, self.statusUpdateRequested.emit)
-            except (SyncError, ValidationError, OSError, Exception) as exc:
+            except (SyncError, ValidationError, OSError) as exc:
                 self.statusUpdateRequested.emit(f"Fehler: {exc}")
+            except Exception as exc:
+                self.statusUpdateRequested.emit(f"Unerwarteter Fehler: {exc}")
             finally:
                 # Any sync lifecycle can create a new local backup, so always refresh the list.
                 self.recoveryBackupsRefreshRequested.emit()
@@ -297,9 +318,7 @@ class AppController(QObject):
         """Compare the normalized form values with the stored profile state."""
         current_data = {
             "display_name": self._normalized_or_stripped(display_name),
-            "game_exe_path": self._normalized_or_stripped(
-                game_exe_path, normalize_launch_target
-            ),
+            "game_exe_path": self._normalized_or_stripped(game_exe_path),
             "save_folder_path": self._normalized_or_stripped(
                 save_folder_path, normalize_save_folder_path
             ),
@@ -337,29 +356,19 @@ class AppController(QObject):
             return ""
         return QUrl.fromLocalFile(str(resolved_path)).toString()
 
-    def _persist(self) -> None:
+    def _persist(self, *, profile_list_changed: bool = True) -> None:
+        """Save current config and emit the matching UI change notifications."""
         self._store.save(self._config)
-        self.profilesChanged.emit()
+        if profile_list_changed:
+            self.profilesChanged.emit()
         self.selectedProfileIdChanged.emit()
         self.selectedProfileDataChanged.emit()
         self._refresh_recovery_backups()
-
-    def _persist_selection(self) -> None:
-        self._store.save(self._config)
-        self.selectedProfileIdChanged.emit()
-        self.selectedProfileDataChanged.emit()
-        self._refresh_recovery_backups()
-
-    def _set_status(self, message: str) -> None:
-        self._apply_status(message)
 
     @Slot(str)
     def _apply_status(self, message: str) -> None:
         self._status_message = message
         self.statusMessageChanged.emit()
-
-    def _set_busy(self, value: bool) -> None:
-        self._apply_busy(value)
 
     @Slot(bool)
     def _apply_busy(self, value: bool) -> None:
@@ -391,13 +400,25 @@ class AppController(QObject):
         return [{"label": path.name, "path": str(path)} for path in backups]
 
     def _file_url_to_path(self, source_url: str) -> str:
-        """Convert file URLs from QML dialogs into a local filesystem path."""
-        if not source_url:
+        """Convert file URLs from QML dialogs into local paths, including UNC shares."""
+        path_text = source_url.strip()
+        if not path_text:
             return ""
-        if "://" not in source_url:
-            return source_url
-        parsed = urlparse(source_url)
-        return unquote(parsed.path.lstrip("/"))
+        url = QUrl(path_text)
+        if not url.scheme():
+            return path_text
+
+        local_path = url.toLocalFile()
+        if local_path:
+            return local_path
+
+        if url.scheme() != "file":
+            return path_text
+
+        authority = url.authority()
+        if authority:
+            return f"//{authority}{url.path()}"
+        return url.path()
 
     def _last_existing_folder(self, raw_path: str) -> Path | None:
         """Walk a path upwards until a real local directory can be used as dialog start folder."""

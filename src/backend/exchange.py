@@ -24,9 +24,12 @@ def export_profiles(profiles: list[GameProfile], destination: Path) -> None:
 
 
 def import_profiles(
-    source: Path, *, existing_profile_ids: set[str] | None = None
+    source: Path,
+    *,
+    existing_profile_ids: set[str] | None = None,
+    apply_save_folder_side_effects: bool = True,
 ) -> ImportProfilesResult:
-    """Load profiles from JSON, validate IDs first, then prepare local save paths."""
+    """Load profiles from JSON, validate IDs first, then optionally prepare local save paths."""
     try:
         payload = json.loads(source.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -45,10 +48,7 @@ def import_profiles(
     if conflicting_ids:
         raise ValidationError(f"Profil-ID '{conflicting_ids[0]}' existiert bereits.")
 
-    prepared_profiles: list[GameProfile] = []
     rewritten_path_count = 0
-    created_directory_count = 0
-    unresolved_path_count = 0
 
     for profile in profiles:
         imported_path = adapt_imported_save_folder_path(profile.save_folder_path)
@@ -56,19 +56,36 @@ def import_profiles(
             profile.save_folder_path = imported_path.path
             rewritten_path_count += 1
 
-        save_folder = Path(profile.save_folder_path)
-        if not save_folder.exists():
-            if save_folder.parent.is_dir():
-                save_folder.mkdir(exist_ok=True)
-                created_directory_count += 1
-            else:
-                unresolved_path_count += 1
-
-        prepared_profiles.append(profile)
+    created_directory_count = 0
+    unresolved_path_count = 0
+    if apply_save_folder_side_effects:
+        created_directory_count, unresolved_path_count = prepare_imported_save_folders(profiles)
 
     return ImportProfilesResult(
-        profiles=prepared_profiles,
+        profiles=profiles,
         rewritten_path_count=rewritten_path_count,
         created_directory_count=created_directory_count,
         unresolved_path_count=unresolved_path_count,
     )
+
+
+def prepare_imported_save_folders(profiles: list[GameProfile]) -> tuple[int, int]:
+    """Create only the last missing save-folder segment for imported profiles."""
+    created_directory_count = 0
+    unresolved_path_count = 0
+
+    for profile in profiles:
+        save_folder = Path(profile.save_folder_path)
+        if save_folder.exists():
+            continue
+        if not save_folder.parent.is_dir():
+            unresolved_path_count += 1
+            continue
+        try:
+            save_folder.mkdir(exist_ok=True)
+        except OSError:
+            unresolved_path_count += 1
+            continue
+        created_directory_count += 1
+
+    return created_directory_count, unresolved_path_count

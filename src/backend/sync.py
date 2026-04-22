@@ -333,8 +333,8 @@ class SaveSyncService:
         if remote_file is None:
             return drive.CreateFile(metadata)
 
-        for key, value in metadata.items():
-            remote_file[key] = value
+        remote_file["title"] = metadata["title"]
+        remote_file["parents"] = metadata.get("parents", [])
         return remote_file
 
     def _run_drive_operation(self, operation, *, report: StatusCallback, prepare_status: str):

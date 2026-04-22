@@ -367,13 +367,14 @@ def test_controller_import_profiles_updates_state(monkeypatch, tmp_path: Path) -
     monkeypatch.setattr(
         ui_module,
         "import_profiles",
-        lambda source, existing_profile_ids=None: ImportProfilesResult(
+        lambda source, existing_profile_ids=None, apply_save_folder_side_effects=True: ImportProfilesResult(
             profiles=[imported_profile],
             rewritten_path_count=1,
             created_directory_count=1,
             unresolved_path_count=0,
         ),
     )
+    monkeypatch.setattr(ui_module, "prepare_imported_save_folders", lambda profiles: (1, 0))
 
     controller = AppController(tmp_path)
     controller.importProfiles(str(tmp_path / "import.json"))
@@ -407,13 +408,14 @@ def test_controller_import_profiles_reports_unresolved_paths(
     monkeypatch.setattr(
         ui_module,
         "import_profiles",
-        lambda source, existing_profile_ids=None: ImportProfilesResult(
+        lambda source, existing_profile_ids=None, apply_save_folder_side_effects=True: ImportProfilesResult(
             profiles=[imported_profile],
             rewritten_path_count=1,
             created_directory_count=0,
             unresolved_path_count=1,
         ),
     )
+    monkeypatch.setattr(ui_module, "prepare_imported_save_folders", lambda profiles: (0, 1))
 
     controller = AppController(tmp_path)
     controller.importProfiles(str(tmp_path / "import.json"))
@@ -453,6 +455,51 @@ def test_controller_export_profiles_writes_json(monkeypatch, tmp_path: Path) -> 
     payload = export_file.read_text(encoding="utf-8")
     assert '"id": "profile-1"' in payload
     assert controller.statusMessage == f"Profile exportiert nach {export_file}."
+
+
+def test_controller_file_url_to_path_handles_unc_file_urls(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ui_module, "ConfigStore", DummyStore)
+
+    controller = AppController(tmp_path)
+
+    assert controller.fileUrlToPath("file://server/share/folder/save.json") == (
+        "//server/share/folder/save.json"
+    )
+
+
+def test_controller_file_url_to_path_preserves_encoded_unc_segments(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ui_module, "ConfigStore", DummyStore)
+
+    controller = AppController(tmp_path)
+
+    assert controller.fileUrlToPath("file://server/share/My%20Game/save.json") == (
+        "//server/share/My Game/save.json"
+    )
+
+
+def test_controller_safe_load_recovers_from_invalid_config(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class BrokenStore:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def load(self) -> AppConfig:
+            raise ValueError("kaputt")
+
+        def save(self, config: AppConfig) -> None:
+            raise AssertionError("save should not be called during recovery")
+
+    monkeypatch.setattr(ui_module, "ConfigStore", BrokenStore)
+
+    controller = AppController(tmp_path)
+
+    assert controller.profileOptions == []
+    assert controller.statusMessage == "Konfiguration konnte nicht geladen werden: kaputt"
 
 
 def test_controller_has_no_unsaved_changes_for_selected_profile(monkeypatch, tmp_path: Path) -> None:

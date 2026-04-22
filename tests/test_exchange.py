@@ -4,7 +4,7 @@ from pathlib import Path, PureWindowsPath
 import pytest
 
 import backend.models as models_module
-from backend.exchange import import_profiles, export_profiles
+from backend.exchange import export_profiles, import_profiles, prepare_imported_save_folders
 from backend.models import GameProfile, ValidationError
 
 
@@ -247,6 +247,46 @@ def test_import_creates_target_directory_when_only_last_segment_is_missing(
     assert save_folder.is_dir()
     assert imported.created_directory_count == 1
     assert imported.unresolved_path_count == 0
+
+
+def test_import_profiles_can_skip_save_folder_side_effects(tmp_path: Path) -> None:
+    target = tmp_path / "profiles.json"
+    save_folder = tmp_path / "existing_parent" / "save.v2"
+    save_folder.parent.mkdir()
+    target.write_text(
+        json.dumps(
+            {
+                "profiles": [
+                    {
+                        "id": "skip-side-effects",
+                        "display_name": "Folder Game",
+                        "game_exe_path": "C:/Games/Game.exe",
+                        "save_folder_path": str(save_folder),
+                        "game_process_names": ["Game.exe"],
+                        "drive_filename": "folder_save",
+                        "drive_folder_id": "",
+                        "cloud_provider": "google_drive",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    imported = import_profiles(target, apply_save_folder_side_effects=False)
+
+    assert imported.profiles[0].save_folder_path == str(save_folder)
+    assert imported.created_directory_count == 0
+    assert imported.unresolved_path_count == 0
+    assert not save_folder.exists()
+
+    created_directory_count, unresolved_path_count = prepare_imported_save_folders(
+        imported.profiles
+    )
+
+    assert created_directory_count == 1
+    assert unresolved_path_count == 0
+    assert save_folder.is_dir()
 
 
 def test_import_leaves_path_unprepared_when_parent_directory_is_missing(tmp_path: Path) -> None:
