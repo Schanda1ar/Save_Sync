@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from PySide6.QtCore import QUrl
+
 from backend.exchange import ImportProfilesResult
 from backend.models import AppConfig
 from backend.ui import AppController
@@ -87,6 +89,61 @@ def test_controller_preserves_numeric_steam_id_in_selected_profile(monkeypatch, 
     controller = AppController(tmp_path)
 
     assert controller.selectedProfileData["game_exe_path"] == "2646460"
+
+
+def test_controller_save_folder_dialog_start_folder_uses_existing_directory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ui_module, "ConfigStore", DummyStore)
+    existing_folder = tmp_path / "save"
+    existing_folder.mkdir()
+
+    controller = AppController(tmp_path)
+
+    assert controller.saveFolderDialogStartFolder(str(existing_folder)) == QUrl.fromLocalFile(
+        str(existing_folder)
+    ).toString()
+
+
+def test_controller_save_folder_dialog_start_folder_uses_parent_for_existing_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ui_module, "ConfigStore", DummyStore)
+    existing_folder = tmp_path / "save"
+    existing_folder.mkdir()
+    save_file = existing_folder / "slot1.sav"
+    save_file.write_text("data", encoding="utf-8")
+
+    controller = AppController(tmp_path)
+
+    assert controller.saveFolderDialogStartFolder(str(save_file)) == QUrl.fromLocalFile(
+        str(existing_folder)
+    ).toString()
+
+
+def test_controller_save_folder_dialog_start_folder_falls_back_to_last_existing_parent(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ui_module, "ConfigStore", DummyStore)
+    existing_root = tmp_path / "userdata"
+    existing_root.mkdir()
+    missing_path = existing_root / "123456789" / "1245620" / "remote" / "profile"
+
+    controller = AppController(tmp_path)
+
+    assert controller.saveFolderDialogStartFolder(str(missing_path)) == QUrl.fromLocalFile(
+        str(existing_root)
+    ).toString()
+
+
+def test_controller_save_folder_dialog_start_folder_returns_empty_for_blank_path(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(ui_module, "ConfigStore", DummyStore)
+
+    controller = AppController(tmp_path)
+
+    assert controller.saveFolderDialogStartFolder("   ") == ""
 
 
 def test_controller_duplicates_selected_profile(monkeypatch, tmp_path: Path) -> None:

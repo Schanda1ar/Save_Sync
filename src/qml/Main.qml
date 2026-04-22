@@ -118,6 +118,7 @@ ApplicationWindow {
     FolderDialog {
         id: saveFolderDialog
         title: "Save-Ordner auswählen"
+        currentFolder: ""
         onAccepted: saveField.text = controller.fileUrlToPath(selectedFolder.toString())
     }
 
@@ -495,7 +496,10 @@ ApplicationWindow {
                         Button {
                             id: saveFolderButton
                             text: "Ordner wählen"
-                            onClicked: saveFolderDialog.open()
+                            onClicked: {
+                                saveFolderDialog.currentFolder = controller.saveFolderDialogStartFolder(saveField.text)
+                                saveFolderDialog.open()
+                            }
                             background: Rectangle {
                                 radius: 10
                                 color: saveFolderButton.hovered ? buttonHoverBg : buttonBg

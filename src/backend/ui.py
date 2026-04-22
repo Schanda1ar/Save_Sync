@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 
 from .exchange import ImportProfilesResult, export_profiles, import_profiles
 from .models import (
@@ -329,6 +329,14 @@ class AppController(QObject):
     def fileUrlToPath(self, source_url: str) -> str:
         return self._file_url_to_path(source_url)
 
+    @Slot(str, result=str)
+    def saveFolderDialogStartFolder(self, current_path: str) -> str:
+        """Return a file URL for the deepest existing folder derived from the current form path."""
+        resolved_path = self._last_existing_folder(current_path)
+        if resolved_path is None:
+            return ""
+        return QUrl.fromLocalFile(str(resolved_path)).toString()
+
     def _persist(self) -> None:
         self._store.save(self._config)
         self.profilesChanged.emit()
@@ -390,6 +398,25 @@ class AppController(QObject):
             return source_url
         parsed = urlparse(source_url)
         return unquote(parsed.path.lstrip("/"))
+
+    def _last_existing_folder(self, raw_path: str) -> Path | None:
+        """Walk a path upwards until a real local directory can be used as dialog start folder."""
+        path_text = raw_path.strip()
+        if not path_text:
+            return None
+
+        candidate = Path(path_text)
+        if candidate.exists():
+            if candidate.is_dir():
+                return candidate
+            if candidate.is_file():
+                return candidate.parent
+            return None
+
+        for parent in candidate.parents:
+            if parent.exists() and parent.is_dir():
+                return parent
+        return None
 
     def _display_drive_filename(self, filename: str) -> str:
         if filename.lower().endswith(".zip"):
